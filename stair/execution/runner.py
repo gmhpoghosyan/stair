@@ -3,16 +3,15 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
 from ..core import pricing
 from ..core.models import Cancel, CycleState, Intent, MarketRules, OrderStatus, Place, Quote, Side
 from ..exchange import ExchangeError, ExchangeGateway, OrderNotFound, UnknownResult
-from ..levels import LevelConfig
 from ..storage import Store
 from ..strategy import Cycle, EngineError, StrategyConfig
-from .level_feed import LevelFeed
 from .sync import OrderSync
 
 log = logging.getLogger("stair.runner")
@@ -26,7 +25,7 @@ _COMMAND_ERRORS = (EngineError, ExchangeError, UnknownResult, ValueError, KeyErr
 class Runner:
     def __init__(self, gateway: ExchangeGateway, store: Store, cfg: StrategyConfig, *,
                  trigger_price: str = "book", reconcile_every_s: float = 15.0,
-                 funding_every_s: float = 300.0, levels: LevelConfig | None = None):
+                 funding_every_s: float = 300.0):
         if trigger_price not in ("book", "last", "mark"):
             raise ValueError("trigger_price must be book, last or mark")
         self.gateway, self.store, self.cfg = gateway, store, cfg
@@ -34,7 +33,6 @@ class Runner:
         self.trigger_price = trigger_price
         self.reconcile_every_s, self.funding_every_s = reconcile_every_s, funding_every_s
         self.sync = OrderSync(gateway, store, self.symbol)
-        self.level_feed = LevelFeed(gateway, store, self.symbol, levels) if levels and levels.enabled else None
         self.rules: MarketRules | None = None
         self.cycle: Cycle | None = None
         self._mismatches = 0
@@ -59,10 +57,12 @@ class Runner:
         self.store.log("start", {"env": self.gateway.env, "symbol": self.symbol})
         return self.rules
 
-    def run(self, poll_interval_s: float, fast_poll_interval_s: float | None = None) -> None:
-        """Polls at `fast_poll_interval_s` while a position is unhedged, else at `poll_interval_s`."""
+    def run(self, poll_interval_s: float, fast_poll_interval_s: float | None = None,
+            stop: Callable[[], bool] | None = None) -> None:
+        """Polls at `fast_poll_interval_s` while a position is unhedged, else at `poll_interval_s`.
+        Returns between ticks once `stop()` is true (used to restart on code changes)."""
         fast = fast_poll_interval_s or poll_interval_s
-        while True:
+        while not (stop and stop()):
             started = time.time()
             ok = True
             try:
@@ -83,7 +83,6 @@ class Runner:
     def tick(self, now: float) -> None:
         self.store.set("heartbeat", now)  # lets the dashboard tell a running bot from a stopped one
         self._handle_commands(now)
-        self._refresh_levels(now)
         cycle = self.cycle
         if cycle is None:
             return
@@ -95,14 +94,12 @@ class Runner:
 
     def _step(self, cycle: Cycle, now: float) -> None:
         self._execute(cycle, self.sync.sync(cycle, now), now)
-        if self.level_feed:
-            self._execute(cycle, self.level_feed.apply(cycle), now)
         quote = self._quote()
         if quote is not None:
             bid, ask = self._trigger_prices(quote)
             self._execute(cycle, cycle.on_quote(bid, ask, now), now)
         # A MARKET hedge or a crossing order fills in its place response: read those trades now
-        # rather than one poll later, so the next leg (hedged state, add exit) goes out this tick.
+        # rather than one poll later, so the next leg (hedge, hedged state) goes out this tick.
         for _ in range(3):
             if not self.sync.trades_pending:
                 break
@@ -123,14 +120,6 @@ class Runner:
             self.cycle = None
 
     # ---- market data ----------------------------------------------------
-
-    def _refresh_levels(self, now: float) -> None:
-        if self.level_feed is None:
-            return
-        try:
-            self.level_feed.refresh(now)
-        except (UnknownResult, ExchangeError) as exc:
-            log.warning("level refresh failed, keeping previous levels: %s", exc)
 
     def _quote(self) -> Quote | None:
         try:
@@ -241,17 +230,6 @@ class Runner:
         if kind == "enter":
             return self._enter(payload, now)
         cycle = self._require_cycle()
-        if kind == "level_add":
-            side = Side.SHORT if payload["kind"] == "resistance" else Side.LONG
-            exit_price = Decimal(payload["exit"]) if payload.get("exit") else None
-            level = cycle.add_level(side, Decimal(payload["price"]), exit_price)
-            return f"level {level.id}: {payload['kind']} {level.price} opens {side.value} adds"
-        if kind == "level_rm":
-            self._execute(cycle, cycle.remove_level(int(payload["id"])), now)
-            return f"level {payload['id']} removed"
-        if kind == "pause":
-            self._execute(cycle, cycle.pause(), now)
-            return "paused: no new adds, exits still managed"
         if kind == "resume":
             self._execute(cycle, cycle.resume(), now)
             return f"resumed into {cycle.state.value}"
@@ -294,7 +272,4 @@ class Runner:
         if crosses:
             note = (" (post-only will be rejected: price crosses the book)" if post_only
                     else " (crosses the book: fills now as taker, see Q07)")
-        add_qty = cycle.cfg.add_fraction * qty
-        if pricing.round_to(add_qty, rules.step_size, up=False) * price < rules.min_notional:
-            note += f"; warning: adds of {add_qty} are below min notional {rules.min_notional}"
         return f"cycle {cycle.id}: {side.value} {qty} @ {price}{' post-only' if post_only else ''}{note}"

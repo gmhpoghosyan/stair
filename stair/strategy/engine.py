@@ -1,4 +1,4 @@
-"""Cycle state machine: first entry -> base hedge -> repeated adds -> manual close.
+"""Cycle state machine: first entry -> base hedge -> manual close.
 
 Pure logic with no I/O. The execution component feeds fills, order statuses and
 quotes in and sends the returned intents to an exchange gateway. The backtest is
@@ -11,13 +11,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from ..core import pricing
-from ..core.models import (ZERO, AddState, Cancel, CycleState, Fill, Intent, MarketRules, Order,
-                           OrderStatus, Place, Purpose, Side)
+from ..core.models import (ZERO, Cancel, CycleState, Fill, Intent, MarketRules, Order, OrderStatus, Place,
+                           Purpose, Side)
 from .config import StrategyConfig
 
 POSITIVE, NEGATIVE = "positive", "negative"
-_CODES = {Purpose.ENTRY: "E", Purpose.HEDGE: "H", Purpose.ADD_OPEN: "A",
-          Purpose.ADD_EXIT: "X", Purpose.CLOSE: "C"}
+_CODES = {Purpose.ENTRY: "E", Purpose.HEDGE: "H", Purpose.CLOSE: "C"}
 
 
 class EngineError(Exception):
@@ -45,32 +44,6 @@ class Book:
 
 
 @dataclass
-class Level:
-    """A support (opens LONG adds) or resistance (opens SHORT adds) given by the user (R08)."""
-    id: int
-    side: Side
-    price: Decimal
-    exit_price: Decimal | None = None
-    add_id: str | None = None  # add currently bound to this level
-    source: str = "manual"     # manual | auto (pivot levels component)
-
-
-@dataclass
-class Add:
-    id: str
-    side: Side
-    level_id: int
-    qty: Decimal
-    price: Decimal
-    exit_price: Decimal
-    entry_id: str
-    state: AddState = AddState.PENDING_ENTRY
-    exit_id: str | None = None  # working exit order, if any
-    exit_ids: list[str] = field(default_factory=list)
-    note: str = ""
-
-
-@dataclass
 class Cycle:
     id: str
     cfg: StrategyConfig
@@ -84,8 +57,6 @@ class Cycle:
     branch: str | None = None  # POSITIVE | NEGATIVE, locked once chosen (R17)
     books: dict[Side, Book] = field(default_factory=lambda: {Side.LONG: Book(), Side.SHORT: Book()})
     orders: dict[str, Order] = field(default_factory=dict)
-    adds: dict[str, Add] = field(default_factory=dict)
-    levels: list[Level] = field(default_factory=list)
     seq: int = 0
     resume_state: CycleState | None = None
     recovery: str | None = None  # reason while halted for reconciliation
@@ -161,59 +132,8 @@ class Cycle:
         self.state = CycleState.WAIT_ENTRY
         return [Place(order)]
 
-    def _level_price(self, side: Side, price: Decimal) -> Decimal:
-        return pricing.round_to(price, self.rules.tick_size, up=side is Side.SHORT)
-
-    def sync_auto_levels(self, resistance: Decimal | None, support: Decimal | None) -> list[Intent]:
-        """Keep one auto resistance and one auto support in line with the latest pivots.
-        A moved level cancels its unfilled add entry; a filled add keeps its exit."""
-        out: list[Intent] = []
-        for side, price in ((Side.SHORT, resistance), (Side.LONG, support)):
-            current = next((lv for lv in self.levels if lv.source == "auto" and lv.side is side), None)
-            if current and price is not None and current.price == self._level_price(side, price):
-                continue
-            if current:
-                out += self.remove_level(current.id)
-            if price is not None:
-                self.add_level(side, price, source="auto")
-        return out
-
-    def add_level(self, side: Side, price: Decimal, exit_price: Decimal | None = None,
-                  source: str = "manual") -> Level:
-        tick = self.rules.tick_size
-        price = self._level_price(side, price)
-        if exit_price is not None:
-            exit_price = pricing.round_to(exit_price, tick, up=side is Side.LONG)
-            if (side is Side.SHORT and exit_price >= price) or (side is Side.LONG and exit_price <= price):
-                raise EngineError("exit must be below a resistance level and above a support level")
-        self.seq += 1  # ids are never reused, so adds and cooldowns stay bound to the right level
-        level = Level(id=self.seq, side=side, price=price, exit_price=exit_price, source=source)
-        self.levels.append(level)
-        return level
-
-    def remove_level(self, level_id: int) -> list[Intent]:
-        level = self._level(level_id)
-        if level is None:
-            raise EngineError(f"no level {level_id}")
-        self.levels.remove(level)
-        out: list[Intent] = []
-        if level.add_id:
-            entry = self.orders[self.adds[level.add_id].entry_id]
-            out += self._cancel(entry)  # an already filled add keeps its exit
-        return out
-
-    def pause(self) -> list[Intent]:
-        """Q24 default: stop new adds, cancel unfilled add entries, keep managing exits."""
-        if self.state is not CycleState.HEDGED:
-            raise EngineError("pause applies only after the base hedge is formed; use close instead")
-        self.state, self.resume_state = CycleState.PAUSED, CycleState.HEDGED
-        out: list[Intent] = []
-        for add in self._live_adds():
-            if add.state in (AddState.PENDING_ENTRY, AddState.PARTIAL_ENTRY):
-                out += self._cancel(self.orders[add.entry_id])
-        return out
-
     def resume(self) -> list[Intent]:
+        """Re-sends the hedge remainder after the cycle paused on an incomplete hedge."""
         if self.state is not CycleState.PAUSED:
             raise EngineError(f"cannot resume from {self.state.value}")
         target, self.resume_state = self.resume_state or CycleState.HEDGED, None
@@ -267,8 +187,6 @@ class Cycle:
             return []  # price-driven decisions wait for reconciliation
         if self.state in (CycleState.ENTRY_PARTIAL, CycleState.SINGLE_POSITION):
             return self._check_hedge_triggers()
-        if self.state in (CycleState.HEDGED, CycleState.PAUSED):
-            return self._manage_adds()
         if self.state is CycleState.CLOSING:
             return self._close_progress()
         return []
@@ -276,13 +194,12 @@ class Cycle:
     # ---- internals ------------------------------------------------------
 
     def _order(self, purpose: Purpose, side: Side, opening: bool, qty: Decimal, *,
-               price: Decimal | None = None, tif: str | None = None,
-               order_type: str = "LIMIT", add_id: str | None = None) -> Order:
+               price: Decimal | None = None, tif: str | None = None, order_type: str = "LIMIT") -> Order:
         self.seq += 1
         order = Order(client_id=f"st-{self.id}-{_CODES[purpose]}{self.seq}", purpose=purpose,
                       position_side=side, opening=opening, qty=qty, order_type=order_type,
                       price=price if order_type == "LIMIT" else None,
-                      tif=tif if order_type == "LIMIT" else None, add_id=add_id)
+                      tif=tif if order_type == "LIMIT" else None)
         self.orders[order.client_id] = order
         return order
 
@@ -298,20 +215,11 @@ class Cycle:
     def _cooldown(self, key: str) -> None:
         self.retry_at[key] = self.now + self.cfg.retry_cooldown_s
 
-    def _level(self, level_id: int) -> Level | None:
-        return next((lv for lv in self.levels if lv.id == level_id), None)
-
-    def _live_adds(self, side: Side | None = None) -> list[Add]:
-        return [a for a in self.adds.values()
-                if a.state is not AddState.CLOSED and (side is None or a.side is side)]
-
     def _progress(self, order: Order) -> list[Intent]:
         if order.purpose is Purpose.ENTRY:
             out = self._entry_progress(order)
         elif order.purpose is Purpose.HEDGE:
             out = self._hedge_progress(order)
-        elif order.purpose in (Purpose.ADD_OPEN, Purpose.ADD_EXIT):
-            out = self._add_progress(order)
         else:
             out = []
             if order.is_terminal and order.filled < order.qty:
@@ -397,126 +305,6 @@ class Cycle:
         fees = sum((o.commission for o in hedges), ZERO)
         return pricing.gross_hedge_spread(self.first_side, self.e0, filled, avg) - self.f0 - fees
 
-    # adds
-
-    def add_qty(self, price: Decimal) -> Decimal | None:
-        """q = add_fraction × Q0 rounded down to the lot step (R09); None if below exchange
-        minimums, since rounding up would add risk (section 9 proposal)."""
-        q = pricing.round_to(self.q0 * self.cfg.add_fraction, self.rules.step_size, up=False)
-        if q < self.rules.min_qty or q * price < self.rules.min_notional:
-            return None
-        return q
-
-    def _improves_average(self, side: Side, price: Decimal) -> bool:
-        avg = self.books[side].avg
-        return price < avg if side is Side.LONG else price > avg
-
-    def _default_exit(self, level: Level) -> Decimal:
-        if level.exit_price is not None:
-            return level.exit_price
-        pct, tick = self.cfg.add_exit_pct, self.rules.tick_size
-        if level.side is Side.SHORT:
-            return pricing.round_to(level.price * (1 - pct), tick, up=False)
-        return pricing.round_to(level.price * (1 + pct), tick, up=True)
-
-    def _exit_reached(self, add: Add) -> bool:
-        return self.ask <= add.exit_price if add.side is Side.SHORT else self.bid >= add.exit_price
-
-    def _manage_adds(self) -> list[Intent]:
-        out: list[Intent] = []
-        for add in self._live_adds():
-            entry = self.orders[add.entry_id]
-            if add.state in (AddState.PENDING_ENTRY, AddState.PARTIAL_ENTRY):
-                if entry.filled > 0 and self._exit_reached(add):
-                    out += self._cancel(entry)  # take what filled to its exit
-            elif add.exit_id is None and self._ready(f"exit:{add.id}"):
-                out.append(self._place_add_exit(add))
-        if self.state is CycleState.HEDGED:
-            out += self._place_new_adds()
-        return out
-
-    def _place_new_adds(self) -> list[Intent]:
-        out: list[Intent] = []
-        for level in self.levels:
-            side = level.side
-            if level.add_id or not self._ready(f"level:{level.id}"):
-                continue
-            if len(self._live_adds(side)) >= self.cfg.max_adds_per_side:
-                continue
-            if self.cfg.require_avg_improvement and not self._improves_average(side, level.price):
-                continue
-            # Resting post-only orders: resistance above the bid, support below the ask.
-            if (side is Side.SHORT and level.price <= self.bid) or (side is Side.LONG and level.price >= self.ask):
-                continue
-            qty = self.add_qty(level.price)
-            if qty is None:
-                continue
-            order = self._order(Purpose.ADD_OPEN, side, True, qty, price=level.price, tif="GTX")
-            add = Add(id=f"a{self.seq}", side=side, level_id=level.id, qty=qty, price=level.price,
-                      exit_price=self._default_exit(level), entry_id=order.client_id)
-            order.add_id = add.id
-            self.adds[add.id] = add
-            level.add_id = add.id
-            out.append(Place(order))
-        return out
-
-    def _exit_filled(self, add: Add) -> Decimal:
-        return sum((self.orders[x].filled for x in add.exit_ids), ZERO)
-
-    def _place_add_exit(self, add: Add) -> Place:
-        remaining = self.orders[add.entry_id].filled - self._exit_filled(add)
-        order = self._order(Purpose.ADD_EXIT, add.side, False, remaining,
-                            price=add.exit_price, tif="GTC", add_id=add.id)
-        add.exit_id = order.client_id
-        add.exit_ids.append(order.client_id)
-        add.state = AddState.PARTIAL_EXIT if self._exit_filled(add) else AddState.PENDING_EXIT
-        return Place(order)
-
-    def _release_level(self, add: Add, cooldown: bool) -> None:
-        level = self._level(add.level_id)
-        if level and level.add_id == add.id:
-            level.add_id = None  # re-arms the level (R11)
-            if cooldown:
-                self._cooldown(f"level:{level.id}")
-
-    def _add_progress(self, order: Order) -> list[Intent]:
-        add = self.adds[order.add_id]
-        if order.purpose is Purpose.ADD_OPEN:
-            if not order.is_terminal:
-                if order.filled > 0:
-                    add.state = AddState.PARTIAL_ENTRY
-                return []
-            if order.filled == 0:
-                add.state = AddState.CLOSED
-                add.note = f"entry {order.status.value} {order.reason or ''}".strip()
-                self._release_level(add, cooldown=order.status is OrderStatus.REJECTED)
-                return []
-            add.state = AddState.OPEN
-            if self.state is CycleState.CLOSING:
-                return []
-            return [self._place_add_exit(add)]
-        if self._exit_filled(add) >= self.orders[add.entry_id].filled:
-            add.state, add.exit_id = AddState.CLOSED, None
-            self._release_level(add, cooldown=False)
-        elif order.is_terminal:
-            add.exit_id = None  # re-placed by _manage_adds after the cooldown
-            self._cooldown(f"exit:{add.id}")
-        elif order.filled > 0:
-            add.state = AddState.PARTIAL_EXIT
-        return []
-
-    def add_result(self, add: Add) -> Decimal:
-        """Virtual add result net of its own fees (section 6, metric 3)."""
-        entry = self.orders[add.entry_id]
-        exits = [self.orders[x] for x in add.exit_ids]
-        closed = sum((o.filled for o in exits), ZERO)
-        if not closed:
-            return ZERO
-        exit_avg = sum((o.notional for o in exits), ZERO) / closed
-        entry_fee = entry.commission * closed / entry.filled
-        return (pricing.side_pnl(add.side, closed, entry.avg_price, exit_avg)
-                - entry_fee - sum((o.commission for o in exits), ZERO))
-
     # close
 
     def _close_progress(self) -> list[Intent]:
@@ -558,7 +346,6 @@ class Cycle:
             "thresholds": thresholds, "base_net_spread": self.base_net_spread(),
             "long": long, "short": short, "delta": self.delta,
             "spread_of_averages": short.avg - long.avg if long.qty and short.qty else None,
-            "closed_adds_result": sum((self.add_result(a) for a in self.adds.values()), ZERO),
             "realized": realized, "unrealized": unrealized, "fees": fees, "funding": self.funding,
             "total": None if unrealized is None else realized + unrealized + self.funding - fees,
             "bid": self.bid, "ask": self.ask,

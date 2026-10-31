@@ -37,10 +37,8 @@ def test_t17_rounding_to_tick_keeps_inequality():
     assert pricing.net_hedge_spread(Side.SHORT, e0, q0, f0, long, fee) >= target
 
 
-def test_t18_add_cycle_identity():
-    """Q(E - E_new) + q(close - E_new) == q(close - p) for one long add round trip."""
-    big_q, e, q, p, close = D("1"), D("100"), D("0.1"), D("90"), D("91")
-    e_new = pricing.weighted_avg(big_q, e, q, p)
+def test_weighted_average_of_partial_fills():
+    """E_new = (Q x E + q x p) / (Q + q): a 0.4 fill at 100 then 0.6 at 101 averages 100.6."""
+    assert pricing.weighted_avg(D("0.4"), D("100"), D("0.6"), D("101")) == D("100.6")
+    e_new = pricing.weighted_avg(D("1"), D("100"), D("0.1"), D("90"))
     assert e_new.quantize(Q) == D("99.090909")
-    lhs = big_q * (e - e_new) + q * (close - e_new)
-    assert lhs.quantize(Q) == (q * (close - p)).quantize(Q)

@@ -6,7 +6,7 @@ import time
 
 from ..storage import Store
 
-KINDS = {"enter", "level_add", "level_rm", "pause", "resume", "close", "ack_recovery"}
+KINDS = {"enter", "resume", "close", "ack_recovery"}
 
 
 def submit(store: Store, kind: str, payload: dict | None = None, wait_s: float = 6.0) -> tuple[str, str | None]:

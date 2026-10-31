@@ -6,15 +6,17 @@ import argparse
 import json
 import logging
 import sys
+import threading
+import time
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 from ..control import submit
-from ..core.models import Side
 from ..exchange import BinanceFutures
 from ..execution import InstanceLock, Runner
 from ..storage import Store
+from . import reload
 from .settings import Settings, load_settings
 
 
@@ -41,8 +43,7 @@ def cmd_check(s: Settings, args) -> None:
         print(f"position       {p.side.value} {p.qty} @ {p.entry_price} lev {p.leverage}x {p.margin_type}")
     orders = gw.open_orders(symbol)
     print(f"open orders    {len(orders)}")
-    min_q0 = rules.min_notional / (s.strategy.add_fraction * quote.ask)
-    print(f"min Q0 for adds ~{min_q0:.2f} (add = {s.strategy.add_fraction} x Q0 must reach min notional)")
+    print(f"min entry      ~{rules.min_notional / quote.ask:.4f} coins (min notional {rules.min_notional} USDT)")
 
 
 def cmd_hedge_mode(s: Settings, args) -> None:
@@ -62,19 +63,30 @@ def cmd_run(s: Settings, args) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         handlers=[logging.StreamHandler(),
                                   logging.FileHandler(s.data_dir / f"stair-{s.env}.log", encoding="utf-8")])
+    journal = logging.getLogger("stair.journal")
+    journal.propagate = False  # its own file only; the main log already has the readable lines
+    handler = logging.FileHandler(s.data_dir / f"stair-{s.env}-journal.log", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    journal.addHandler(handler)
     store = Store(s.db_path)
+    watcher = reload.SourceWatcher([args.config, args.env_file]) if reload.is_child() else None
     with InstanceLock(s.lock_path):
         runner = Runner(_gateway(s), store, s.strategy, trigger_price=s.trigger_price,
-                        reconcile_every_s=s.reconcile_every_s, levels=s.levels)
+                        reconcile_every_s=s.reconcile_every_s)
         runner.preflight()
         logging.getLogger("stair").info("running on %s %s; Ctrl+C stops the bot only", s.env, s.strategy.symbol)
         try:
-            runner.run(s.poll_interval_s, s.fast_poll_interval_s)
+            runner.run(s.poll_interval_s, s.fast_poll_interval_s, stop=watcher.changed if watcher else None)
         except KeyboardInterrupt:
             if runner.cycle:
                 store.save_cycle(runner.cycle)
             print("\nstopped. Positions and resting orders stay on the exchange; "
                   "nothing was closed (section 10). Restart with `run` to resume.")
+            return
+        if runner.cycle:
+            store.save_cycle(runner.cycle)
+        logging.getLogger("stair").info("code or config changed; restarting between ticks")
+    sys.exit(reload.RESTART_EXIT)
 
 
 def _send(s: Settings, kind: str, payload: dict | None = None) -> None:
@@ -89,13 +101,6 @@ def _send(s: Settings, kind: str, payload: dict | None = None) -> None:
 
 def cmd_enter(s: Settings, args) -> None:
     _send(s, "enter", {"side": args.side, "qty": args.qty, "price": args.price, "post_only": args.post_only})
-
-
-def cmd_level(s: Settings, args) -> None:
-    if args.action == "rm":
-        _send(s, "level_rm", {"id": args.id})
-    else:
-        _send(s, "level_add", {"kind": args.kind, "price": args.price, "exit": args.exit})
 
 
 def _fmt(v) -> str:
@@ -126,17 +131,7 @@ def cmd_status(s: Settings, args) -> None:
     print(f"delta {_fmt(m['delta'])}  spread of averages ES-EL {_fmt(m['spread_of_averages'])}  "
           f"base net spread {_fmt(m['base_net_spread'])}")
     print(f"bid {_fmt(m['bid'])} ask {_fmt(m['ask'])}  unrealized {_fmt(m['unrealized'])}  "
-          f"funding {_fmt(m['funding'])}  total {_fmt(m['total'])}  closed adds {_fmt(m['closed_adds_result'])}")
-    auto = store.get("auto_levels")
-    if auto:
-        print(f"pivot levels ({auto['interval']}): resistance {auto['resistance']} support {auto['support']}"
-              f"{'  SIGNAL ' + auto['signal'] if auto['signal'] else ''}")
-    for lv in cycle.levels:
-        print(f"level {lv.id} [{lv.source}]: {'resistance' if lv.side is Side.SHORT else 'support'} {lv.price} "
-              f"exit {lv.exit_price or 'default'} {'busy ' + lv.add_id if lv.add_id else 'armed'}")
-    for add in cycle.adds.values():
-        print(f"add {add.id}: {add.side.value} {add.qty} @ {add.price} -> {add.exit_price} {add.state.value} "
-              f"result {_fmt(cycle.add_result(add))} {add.note}")
+          f"funding {_fmt(m['funding'])}  total {_fmt(m['total'])}")
     for o in cycle.orders.values():
         if not o.is_terminal:
             print(f"order {o.client_id} {o.purpose.value} {o.side} {o.position_side.value} "
@@ -154,13 +149,26 @@ def cmd_dashboard(s: Settings, args) -> None:
     server = make_server(data, args.port)
     url = f"http://127.0.0.1:{args.port}/"
     print(f"dashboard on {url} (read-only, local only). Ctrl+C to stop.")
-    if not args.no_browser:
+    if not args.no_browser and not reload.is_restart():
         import webbrowser
         webbrowser.open(url)
+    watcher = reload.SourceWatcher([args.config, args.env_file]) if reload.is_child() else None
+    if watcher:
+        threading.Thread(target=_shutdown_on_change, args=(server, watcher), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        pass
+    finally:
         server.server_close()
+    if watcher and watcher.fired:
+        sys.exit(reload.RESTART_EXIT)
+
+
+def _shutdown_on_change(server, watcher: reload.SourceWatcher) -> None:
+    while not watcher.changed():
+        time.sleep(0.5)
+    server.shutdown()
 
 
 def cmd_log(s: Settings, args) -> None:
@@ -182,23 +190,17 @@ def build_parser() -> argparse.ArgumentParser:
     mt = sub.add_parser("margin-type", help="cross or isolated margin for the configured symbol (Q03)")
     mt.add_argument("type", choices=["cross", "isolated"])
     mt.set_defaults(fn=cmd_margin_type)
-    sub.add_parser("run", help="run the bot loop").set_defaults(fn=cmd_run)
+    rn = sub.add_parser("run", help="run the bot loop")
+    rn.add_argument("--reload", action=argparse.BooleanOptionalAction, default=None,
+                    help="restart between ticks when code or config changes (default: on for demo, off for live)")
+    rn.set_defaults(fn=cmd_run)
     en = sub.add_parser("enter", help="start a cycle with a limit entry (R04, R20)")
     en.add_argument("side", choices=["long", "short"])
     en.add_argument("--qty", required=True, help="coins, e.g. 1")
     en.add_argument("--price", required=True, help="limit price")
     en.add_argument("--post-only", action="store_true", help="GTX: rejected instead of taking")
     en.set_defaults(fn=cmd_enter)
-    lv = sub.add_parser("level", help="manage support/resistance levels for adds (R08)")
-    lv_sub = lv.add_subparsers(dest="action", required=True)
-    la = lv_sub.add_parser("add")
-    la.add_argument("kind", choices=["resistance", "support"])
-    la.add_argument("price")
-    la.add_argument("--exit", help="take-profit price for adds at this level (Q13)")
-    lr = lv_sub.add_parser("rm")
-    lr.add_argument("id", type=int)
-    lv.set_defaults(fn=cmd_level)
-    for name, kind, text in (("pause", "pause", "stop new adds (Q24)"), ("resume", "resume", "resume after pause"),
+    for name, kind, text in (("resume", "resume", "re-send the hedge remainder after an incomplete hedge paused the cycle"),
                              ("close", "close", "close the whole cycle at market (R14)"),
                              ("ack", "ack_recovery", "clear RECOVERY after fixing a mismatch")):
         sub.add_parser(name, help=text).set_defaults(fn=lambda s, a, k=kind: _send(s, k))
@@ -207,6 +209,8 @@ def build_parser() -> argparse.ArgumentParser:
     db.add_argument("--port", type=int, default=8765)
     db.add_argument("--no-exchange", action="store_true", help="journal only, no exchange calls")
     db.add_argument("--no-browser", action="store_true")
+    db.add_argument("--reload", action=argparse.BooleanOptionalAction, default=None,
+                    help="restart when code or config changes (default: on)")
     db.set_defaults(fn=cmd_dashboard)
     lg = sub.add_parser("log", help="recent journal events")
     lg.add_argument("-n", type=int, default=30)
@@ -215,7 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
     args = build_parser().parse_args(argv)
     settings = load_settings(args.config, args.env_file, args.env)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    if getattr(args, "reload", None) is None:
+        args.reload = args.command == "dashboard" or settings.env == "demo"  # never silently on for live
+    if args.command in ("run", "dashboard") and args.reload and not reload.is_child():
+        sys.exit(reload.supervise(argv, [args.config, args.env_file]))
     args.fn(settings, args)

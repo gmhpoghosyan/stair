@@ -74,7 +74,6 @@ class FakeGateway:
     def balances(self): return {"USDT": D("1000")}
     def to_usdt(self, amount, asset): return amount
     def funding_since(self, symbol, start_ms): return D(0)
-    def closed_candles(self, symbol, interval, limit=500): return []
 
     def positions(self, symbol):
         qty = {Side.LONG: D(0), Side.SHORT: D(0)}

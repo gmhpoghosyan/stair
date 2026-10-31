@@ -11,7 +11,6 @@ import requests
 
 from ..core.models import (MarketRules, Order, OrderReport, OrderStatus, PositionView, Quote, Side,
                            Trade)
-from ..levels import Candle
 from .base import ExchangeError, OrderNotFound, UnknownResult
 
 BASE_URLS = {"demo": "https://demo-fapi.binance.com", "live": "https://fapi.binance.com"}
@@ -139,14 +138,6 @@ class BinanceFutures:
         if mark:
             quote.mark = Decimal(self._request("GET", "/fapi/v1/premiumIndex", {"symbol": symbol})["markPrice"])
         return quote
-
-    def closed_candles(self, symbol: str, interval: str, limit: int = 500) -> list[Candle]:
-        rows = self._request("GET", "/fapi/v1/klines", {"symbol": symbol, "interval": interval,
-                                                       "limit": min(limit + 1, 1500)})
-        now_ms = int(time.time() * 1000) + self._offset_ms
-        candles = [Candle(open_ms=int(r[0]), open=Decimal(r[1]), high=Decimal(r[2]), low=Decimal(r[3]),
-                          close=Decimal(r[4]), volume=Decimal(r[5]), close_ms=int(r[6])) for r in rows]
-        return [c for c in candles if c.close_ms < now_ms][-limit:]  # drop the forming candle
 
     def to_usdt(self, amount: Decimal, asset: str) -> Decimal:
         """Fee conversion (BNB fees). The rate is cached briefly so a burst of fills costs one request."""

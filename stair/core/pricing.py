@@ -38,9 +38,9 @@ def round_to(value: Decimal, step: Decimal, up: bool) -> Decimal:
     return units * step
 
 
-def weighted_avg(qty: Decimal, avg: Decimal, add_qty: Decimal, add_price: Decimal) -> Decimal:
+def weighted_avg(qty: Decimal, avg: Decimal, fill_qty: Decimal, fill_price: Decimal) -> Decimal:
     """E_new = (Q × E + q × p) / (Q + q), section 6."""
-    return (qty * avg + add_qty * add_price) / (qty + add_qty)
+    return (qty * avg + fill_qty * fill_price) / (qty + fill_qty)
 
 
 def side_pnl(side: Side, qty: Decimal, entry: Decimal, price: Decimal) -> Decimal:

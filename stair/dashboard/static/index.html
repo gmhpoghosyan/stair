@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>stair dashboard</title>
+<title>Stair dashboard</title>
 <style>
 :root {
   color-scheme: light;
@@ -13,110 +13,119 @@
   --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --neutral: #898781;
 }
 @media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
+  :root {
     color-scheme: dark;
     --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.05);
     --series-1: #3987e5; --up: #0ca30c; --down: #e66767;
   }
 }
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
-  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.05);
-  --series-1: #3987e5; --up: #0ca30c; --down: #e66767;
-}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--ink);
-       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 48px; }
-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 18px; }
-header h1 { font-size: 20px; margin: 0 8px 0 0; letter-spacing: -0.01em; }
-header .spacer { flex: 1; }
-.meta { color: var(--ink-2); font-size: 13px; }
-button.theme { background: var(--surface); color: var(--ink-2); border: 1px solid var(--border);
-               border-radius: 8px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
-.banner { border: 1px solid var(--border); border-left: 4px solid var(--critical); background: var(--surface);
-          border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
-.banner.serious { border-left-color: var(--serious); }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.tile, .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
-.tile { padding: 14px 16px; }
-.tile .label { color: var(--ink-2); font-size: 12px; margin-bottom: 6px; }
-.tile .value { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
-.tile .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
-.card { padding: 16px; margin-bottom: 18px; }
-.card h2 { font-size: 15px; margin: 0 0 4px; }
-.card .hint { color: var(--ink-2); font-size: 12px; margin: 0 0 12px; }
-.card h3 { font-size: 13px; color: var(--ink-2); font-weight: 600; margin: 18px 0 8px; }
-.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; margin: 8px 0 4px; }
-.facts > div > span { display: block; color: var(--ink-2); font-size: 12px; }
+       font: 0.875rem/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 77.5rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem 1rem; margin-bottom: 1.125rem; }
+header h1 { font-size: 1.25rem; margin: 0 0.5rem 0 0; letter-spacing: -0.01em; }
+.banner { border: 0.0625rem solid var(--border); border-left: 0.25rem solid var(--critical); background: var(--surface);
+          border-radius: 0.625rem; padding: 0.625rem 0.875rem; margin-bottom: 0.875rem; }
+/* One row of equal tiles on wide screens; 4 per row on tablets, 2 on phones. */
+.tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.625rem; margin-bottom: 1.125rem; }
+@media (max-width: 68.75rem) {
+  .tiles { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 40rem) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+.tile, .card { background: var(--surface); border: 0.0625rem solid var(--border); border-radius: 0.75rem; }
+.tile { padding: 0.625rem 0.75rem; min-width: 0; }
+.tile .label { color: var(--ink-2); font-size: 0.75rem; margin-bottom: 0.25rem; }
+.tile .value { font-size: clamp(1.0625rem, 1.7vw, 1.375rem); font-weight: 600; letter-spacing: -0.01em;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .sub { color: var(--muted); font-size: 0.6875rem; margin-top: 0.1875rem; }
+.card { padding: 1rem; margin-bottom: 1.125rem; }
+.card h2 { font-size: 0.9375rem; margin: 0 0 0.25rem; }
+.card .hint { color: var(--ink-2); font-size: 0.75rem; margin: 0 0 0.75rem; }
+.card h3 { font-size: 0.8125rem; color: var(--ink-2); font-weight: 600; margin: 1.125rem 0 0.5rem; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.375rem, 1fr)); gap: 0.625rem 1rem; margin: 0.5rem 0 0.25rem; }
+.facts > div > span { display: block; color: var(--ink-2); font-size: 0.75rem; }
 .facts > div > b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th { text-align: left; color: var(--ink-2); font-weight: 500; font-size: 12px; padding: 6px 10px;
-     border-bottom: 1px solid var(--axis); white-space: nowrap; }
-td { padding: 7px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { text-align: left; color: var(--ink-2); font-weight: 500; font-size: 0.75rem; padding: 0.375rem 0.625rem;
+     border-bottom: 0.0625rem solid var(--axis); white-space: nowrap; }
+td { padding: 0.4375rem 0.625rem; border-bottom: 0.0625rem solid var(--grid); white-space: nowrap; }
 td.num, th.num { text-align: right; }
 tr:hover td { background: var(--wash); }
-.empty { color: var(--muted); padding: 10px 2px; }
+.empty { color: var(--muted); padding: 0.625rem 0.125rem; }
 .up { color: var(--up); } .down { color: var(--down); }
-.badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
-         border-radius: 999px; padding: 2px 10px 2px 8px; font-size: 12px; font-weight: 600; color: var(--ink);
+.badge { display: inline-flex; align-items: center; gap: 0.375rem; border: 0.0625rem solid var(--border);
+         border-radius: 999rem; padding: 0.125rem 0.625rem 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 600; color: var(--ink);
          background: var(--surface); white-space: nowrap; }
-.badge i { font-style: normal; font-size: 11px; line-height: 1; width: 16px; height: 16px; border-radius: 50%;
+.badge i { font-style: normal; font-size: 0.6875rem; line-height: 1; width: 1rem; height: 1rem; border-radius: 50%;
            display: inline-flex; align-items: center; justify-content: center; color: #fff; }
 .badge.good i { background: var(--good); } .badge.warning i { background: var(--warning); color: #0b0b0b; }
 .badge.serious i { background: var(--serious); } .badge.critical i { background: var(--critical); }
-.badge.neutral i { background: var(--neutral); }
-.tile .value .badge { font-size: 15px; padding: 4px 12px 4px 8px; }
-.side { font-weight: 600; font-size: 12px; letter-spacing: 0.02em; }
+.badge.neutral i { background: var(--neutral); } .badge.info i { background: var(--series-1); }
+.tile .value .badge { font-size: 0.875rem; padding: 0.1875rem 0.625rem 0.1875rem 0.4375rem; }
+.side { font-weight: 600; font-size: 0.75rem; letter-spacing: 0.02em; }
 .chart { position: relative; }
-.chart svg { display: block; width: 100%; height: 200px; overflow: visible; }
-.chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart svg { display: block; width: 100%; height: 12.5rem; overflow: visible; }
+.chart .tick { fill: var(--muted); font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
 .tooltip { position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
-           border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px;
-           box-shadow: 0 4px 16px rgba(0,0,0,0.12); white-space: nowrap; display: none; z-index: 2; }
+           border: 0.0625rem solid var(--border); border-radius: 0.5rem; padding: 0.5rem 0.625rem; font-size: 0.75rem;
+           box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.12); white-space: nowrap; display: none; z-index: 2; }
 .tooltip b { font-variant-numeric: tabular-nums; }
-.events td { font-size: 12px; }
-.events td.payload { white-space: normal; color: var(--ink-2); word-break: break-word; }
-.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; }
+/* Open positions: one accordion per symbol (both hedge legs on one line); its panel holds the bot cycle. */
+.pos-row { display: grid; align-items: center; gap: 0 0.75rem; padding: 0.4375rem 0.625rem;
+           grid-template-columns: 1.25rem minmax(5.5rem, 1fr) minmax(6.5rem, 1.1fr) repeat(2, minmax(6.5rem, 1.3fr))
+                                  repeat(4, minmax(0, 1fr)) minmax(3rem, 0.6fr) minmax(3.5rem, 0.6fr);
+           font-variant-numeric: tabular-nums; }
+.pos-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pos-row .num { text-align: right; }
+.pos-labels { color: var(--ink-2); font-weight: 500; font-size: 0.75rem; padding-block: 0.375rem;
+              border-bottom: 0.0625rem solid var(--axis); }
+.pos { border-bottom: 0.0625rem solid var(--grid); }
+.pos > summary { cursor: pointer; list-style: none; border-radius: 0.375rem; }
+.pos > summary::-webkit-details-marker { display: none; }
+.pos > summary:hover { background: var(--wash); }
+.pos > summary:focus-visible { outline: 0.125rem solid var(--series-1); outline-offset: -0.125rem; }
+.pos .chev { color: var(--muted); font-size: 1.125rem; line-height: 1; transition: transform 0.15s; }
+.pos[open] .chev { transform: rotate(90deg); }
+.pos-panel { padding: 0.25rem 0.625rem 1rem 2.625rem; }
+@media (max-width: 56rem) {
+  .pos-labels { display: none; }
+  .pos-row { grid-template-columns: 1.25rem repeat(3, minmax(0, 1fr)); row-gap: 0.5rem; }
+  .pos-row .chev { grid-row: span 4; align-self: start; }
+  .pos-row .num { text-align: left; }
+  .pos-row [data-label]::before { content: attr(data-label); display: block; color: var(--ink-2); font-size: 0.6875rem; }
+  .pos-panel { padding-left: 0.625rem; }
+}
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>stair</h1>
+    <h1>Stair</h1>
     <span id="env"></span>
     <span id="bot"></span>
     <span id="exch"></span>
-    <span class="spacer"></span>
-    <span class="meta" id="quote"></span>
-    <span class="meta" id="updated"></span>
-    <button class="theme" id="theme" type="button">Theme: auto</button>
   </header>
   <div id="banners"></div>
   <section class="tiles" id="tiles"></section>
 
   <section class="card">
     <h2>Open positions</h2>
-    <p class="hint">Live from the exchange, all symbols, refreshed every few seconds.</p>
-    <div class="scroll" id="positions"></div>
+    <p class="hint">Live from the exchange, all symbols, refreshed every few seconds. Open a position to see its bot cycle.</p>
+    <div id="positions"></div>
   </section>
-
-  <section class="card" id="cycle"></section>
 
   <section class="card">
     <h2>Closed cycles</h2>
     <p class="hint">Net result per cycle = realized PnL + funding − fees. The line shows the running total.</p>
     <div class="chart" id="chart"></div>
     <div class="scroll" id="closed"></div>
-  </section>
-
-  <section class="card">
-    <h2>Journal</h2>
-    <p class="hint">Latest bot events, newest last.</p>
-    <div class="scroll" id="events"></div>
   </section>
 </main>
 <script>
@@ -128,9 +137,7 @@ const STATES = {
   PAUSED: ["serious", "‖", "Paused"], CLOSING: ["serious", "■", "Closing"],
   RECOVERY: ["critical", "✕", "Recovery"], FINISHED: ["neutral", "○", "Finished"],
 };
-const ADD_STATES = { CLOSED: "neutral", OPEN: "warning", PENDING_ENTRY: "neutral", PARTIAL_ENTRY: "warning",
-                     PENDING_EXIT: "warning", PARTIAL_EXIT: "warning", ERROR: "critical" };
-const ICONS = { good: "✓", warning: "!", serious: "■", critical: "✕", neutral: "○" };
+const ICONS = { good: "✓", warning: "!", serious: "■", critical: "✕", neutral: "○", info: "●" };
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num = v => (v === null || v === undefined || v === "") ? null : Number(v);
@@ -165,16 +172,13 @@ function table(cols, rows, empty) {
 
 function renderHeader(d) {
   document.getElementById("env").innerHTML = d.env === "live"
-    ? badge("critical", "LIVE · real money") : badge("neutral", "DEMO");
+    ? badge("critical", "LIVE · real money") : badge("info", "DEMO · test funds");
   const age = d.heartbeat ? d.now - d.heartbeat : null;
   document.getElementById("bot").innerHTML = age === null ? badge("neutral", "Bot never ran")
     : age < 10 ? badge("good", "Bot running") : badge("serious", `Bot stopped · ${duration(d.heartbeat, d.now)} ago`);
   const ex = d.exchange;
   document.getElementById("exch").innerHTML = !ex.enabled ? badge("neutral", "Exchange view off")
     : ex.error ? badge("critical", "Exchange unreachable") : badge("good", "Exchange connected");
-  const q = ex.quote;
-  document.getElementById("quote").textContent = q ? `${d.symbol} bid ${fmt(q.bid)} · ask ${fmt(q.ask)} · mark ${fmt(q.mark)}` : d.symbol;
-  document.getElementById("updated").textContent = `updated ${new Date().toLocaleTimeString()}`;
 }
 
 function exchangeSides(d) {
@@ -185,18 +189,13 @@ function exchangeSides(d) {
 
 function renderBanners(d) {
   const msgs = [];
-  if (d.exchange.error) msgs.push(["critical", `Exchange data may be stale: ${d.exchange.error}`]);
+  if (d.exchange.error) msgs.push(`Exchange data may be stale: ${d.exchange.error}`);
   const c = d.cycle;
-  if (c && c.recovery) msgs.push(["critical", `Recovery: ${c.recovery}. Fix it, then run <span class="mono">python -m stair ack</span>.`]);
-  if (c && d.exchange.positions && !d.exchange.error) {
-    const ex = exchangeSides(d);
-    const mism = ["LONG", "SHORT"].filter(s => Math.abs(ex[s] - Number(c[s.toLowerCase()].qty)) > 1e-9);
-    if (mism.length && !c.recovery) msgs.push(["serious", `Exchange and bot quantities differ on ${mism.join(" and ")} (can be a fill in flight; the bot flags it after two checks).`]);
-  }
+  if (c && c.recovery) msgs.push(`Recovery: ${c.recovery}. Fix it, then run <span class="mono">python -m stair ack</span>.`);
   if (c && ["SINGLE_POSITION", "ENTRY_PARTIAL", "HEDGE_PENDING"].includes(c.state) && !(d.heartbeat && d.now - d.heartbeat < 10))
-    msgs.push(["critical", "The cycle has unhedged exposure and the bot is not running. Hedge triggers only work while <span class=\"mono\">python -m stair run</span> is active."]);
-  document.getElementById("banners").innerHTML = msgs.map(([t, m]) =>
-    `<div class="banner ${t === "serious" ? "serious" : ""}">${badge(t, t === "critical" ? "Attention" : "Check")} &nbsp;${m}</div>`).join("");
+    msgs.push("The cycle has unhedged exposure and the bot is not running. Hedge triggers only work while <span class=\"mono\">python -m stair run</span> is active.");
+  document.getElementById("banners").innerHTML = msgs.map(m =>
+    `<div class="banner">${badge("critical", "Attention")} &nbsp;${m}</div>`).join("");
 }
 
 function renderTiles(d) {
@@ -207,44 +206,86 @@ function renderTiles(d) {
     ["Cycle state", badge(st[0], st[2], st[1]), c ? `cycle ${esc(c.cycle)} · ${esc(c.first_side || "")} first` : "start with enter"],
     ["Open positions", String((d.exchange.positions || []).length), d.exchange.positions ? `unrealized ${signed(openUpnl, 2)} USDT` : "exchange view off"],
     ["Delta (long − short)", c ? fmt(c.delta) : "–", "coins of directional exposure"],
-    ["Spread of averages ES − EL", c && c.spread_of_averages !== null ? fmt(c.spread_of_averages) : "–", "the target the adds widen (R19)"],
     ["Active cycle P&L", c ? signed(c.total, 2) : "–", "USDT, incl. unrealized, after fees"],
     ["Closed cycles net", signed(d.closed_net_total, 2), `${d.closed.length} cycle${d.closed.length === 1 ? "" : "s"} · USDT`],
   ];
-  const lv = d.auto_levels;
-  if (lv) {
-    const sig = lv.signal ? badge("warning", lv.signal.replace("_", " ")) : "";
-    tiles.push([`Pivot levels (${esc(lv.interval)})`,
-      `<span style="font-size:17px">R ${fmt(lv.resistance)} · S ${fmt(lv.support)}</span>`,
-      `${sig} last bar ${new Date(lv.bar_close_ms).toLocaleTimeString()} · vol osc ${fmt(lv.volume_osc, 1)}%`]);
-  }
   document.getElementById("tiles").innerHTML = tiles.map(([l, v, s]) =>
     `<div class="tile"><div class="label">${esc(l)}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
 }
 
-function renderPositions(d) {
-  const rows = d.exchange.positions || [];
-  document.getElementById("positions").innerHTML = table([
-    { label: "Symbol", html: r => esc(r.symbol) },
-    { label: "Side", html: r => sideLabel(r.side) },
-    { label: "Qty", num: true, html: r => fmt(r.qty) },
-    { label: "Entry", num: true, html: r => fmt(r.entry_price) },
-    { label: "Mark", num: true, html: r => fmt(r.mark_price) },
-    { label: "Unrealized (USDT)", num: true, html: r => signed(r.unrealized, 2) },
-    { label: "Liq. price", num: true, html: r => Number(r.liquidation_price) ? fmt(r.liquidation_price) : "–" },
-    { label: "Leverage", num: true, html: r => `${r.leverage}×` },
-    { label: "Margin", html: r => esc(r.margin_type) },
-  ], rows, d.exchange.enabled ? "No open positions on the account." : "Exchange view is off (--no-exchange).");
+const leg = p => p && Number(p.qty) ? `${fmt(p.qty)} @ ${fmt(p.entry_price)}` : "–";
+const POSITION_COLS = [
+  { label: "Symbol", html: g => esc(g.symbol) },
+  { label: "State", html: g => g.state },
+  { label: "Long", num: true, html: g => leg(g.LONG) },
+  { label: "Short", num: true, html: g => leg(g.SHORT) },
+  { label: "Delta", num: true, html: g => g.legs.length ? fmt(g.delta) : "–" },
+  { label: "Mark", num: true, html: g => fmt(g.legs[0]?.mark_price) },
+  { label: "Unrealized (USDT)", num: true, html: g => g.legs.length ? signed(g.unrealized, 2) : "–" },
+  { label: "Liq. price", num: true, html: g => g.liq.length ? g.liq.map(v => fmt(v)).join(" / ") : "–" },
+  { label: "Leverage", num: true, html: g => g.legs[0] ? `${g.legs[0].leverage}×` : "–" },
+  { label: "Margin", html: g => esc(g.legs[0]?.margin_type || "–") },
+];
+
+// One row per symbol: the LONG and SHORT legs of a hedge share a line.
+function positionGroups(d) {
+  const c = d.cycle;
+  const bySymbol = new Map();
+  if (c) bySymbol.set(c.symbol, []);  // the bot's symbol first, even before it has an exchange position
+  for (const p of (d.exchange.positions || [])) {
+    if (!bySymbol.has(p.symbol)) bySymbol.set(p.symbol, []);
+    bySymbol.get(p.symbol).push(p);
+  }
+  return [...bySymbol].map(([symbol, legs]) => {
+    const g = { symbol, legs, LONG: legs.find(p => p.side === "LONG"), SHORT: legs.find(p => p.side === "SHORT") };
+    g.delta = Number(g.LONG?.qty || 0) - Number(g.SHORT?.qty || 0);
+    g.unrealized = legs.reduce((sum, p) => sum + Number(p.unrealized), 0);
+    g.liq = [...new Set(legs.map(p => Number(p.liquidation_price)).filter(Boolean))];
+    if (c && c.symbol === symbol) {
+      const st = STATES[c.state] || ["neutral", "○", c.state];
+      g.state = badge(st[0], st[2], st[1]);
+    } else {
+      g.state = g.LONG && g.SHORT ? "hedge" : legs.length ? `${esc(legs[0].side.toLowerCase())} only` : "–";
+    }
+    return g;
+  });
 }
 
-function renderCycle(d) {
-  const el = document.getElementById("cycle");
+// Which accordions are open survives the refresh re-render (and a reload, where storage allows).
+const openPositions = new Set((() => {
+  try { return JSON.parse(localStorage.getItem("stair-open-positions") || "[]"); } catch (e) { return []; }
+})());
+document.getElementById("positions").addEventListener("toggle", ev => {
+  const el = ev.target;
+  if (!el.matches || !el.matches("details.pos")) return;
+  if (el.open) openPositions.add(el.dataset.key); else openPositions.delete(el.dataset.key);
+  try { localStorage.setItem("stair-open-positions", JSON.stringify([...openPositions])); } catch (e) {}
+}, true);  // toggle does not bubble
+
+function renderPositions(d) {
+  const el = document.getElementById("positions");
   const c = d.cycle;
-  if (!c) {
-    el.innerHTML = `<h2>Active cycle</h2><div class="empty">No active cycle. Start one with
-      <span class="mono">python -m stair enter long --qty 1 --price &lt;price&gt;</span>.</div>`;
+  const groups = positionGroups(d);
+  if (!groups.length) {
+    el.innerHTML = `<div class="empty">${d.exchange.enabled ? "No open positions on the account. Start a cycle with "
+      + '<span class="mono">python -m stair enter long --qty 1 --price &lt;price&gt;</span>.' : "Exchange view is off (--no-exchange)."}</div>`;
     return;
   }
+  const labels = POSITION_COLS.map(col => `<span class="${col.num ? "num" : ""}">${esc(col.label)}</span>`).join("");
+  el.innerHTML = `<div class="pos-row pos-labels" aria-hidden="true"><span></span>${labels}</div>` + groups.map(g => {
+    const cells = POSITION_COLS.map(col =>
+      `<span class="${col.num ? "num" : ""}" data-label="${esc(col.label)}">${col.html(g)}</span>`).join("");
+    const panel = c && c.symbol === g.symbol ? cycleDetails(d)
+      : `<div class="empty">No bot cycle on ${esc(g.symbol)}: this position was opened outside the bot.</div>`;
+    return `<details class="pos" data-key="${esc(g.symbol)}"${openPositions.has(g.symbol) ? " open" : ""}>
+      <summary class="pos-row"><span class="chev" aria-hidden="true">›</span>${cells}</summary>
+      <div class="pos-panel">${panel}</div></details>`;
+  }).join("");
+}
+
+// The active cycle: facts, both books against the exchange, and working orders.
+function cycleDetails(d) {
+  const c = d.cycle;
   const st = STATES[c.state] || ["neutral", "○", c.state];
   const ex = exchangeSides(d);
   const th = c.thresholds;
@@ -254,14 +295,14 @@ function renderCycle(d) {
     ["Entry fee F0", fmt(c.f0, 6)], ["Hedge branch", esc(c.branch || "–")],
     ["Positive threshold", th ? fmt(th.positive) : "–"], ["Negative threshold", th ? fmt(th.negative) : "–"],
     ["Base net spread", c.base_net_spread !== null ? signed(c.base_net_spread, 4) : "–"],
+    ["Spread of averages ES − EL", c.spread_of_averages !== null ? fmt(c.spread_of_averages) : "–"],
     ["Realized", signed(c.realized, 4)], ["Unrealized", signed(c.unrealized, 4)],
     ["Fees", fmt(c.fees, 6)], ["Funding", signed(c.funding, 6)],
-    ["Closed adds result", signed(c.closed_adds_result, 4)], ["Total", signed(c.total, 4)],
+    ["Total", signed(c.total, 4)],
   ];
   const books = ["LONG", "SHORT"].map(s => ({ side: s, ...c[s.toLowerCase()], ex: ex[s] }));
-  el.innerHTML = `
-    <h2>Active cycle ${esc(c.cycle)} · ${esc(c.symbol)}</h2>
-    <p class="hint">${esc(c.note || "")}</p>
+  return `
+    <p class="hint">Cycle <span class="mono">${esc(c.cycle)}</span>${c.note ? ` · ${esc(c.note)}` : ""}</p>
     <div class="facts">${facts.map(([k, v]) => `<div><span>${esc(k)}</span><b>${v}</b></div>`).join("")}</div>
     <h3>Position sides (bot books vs exchange)</h3>
     <div class="scroll">${table([
@@ -273,23 +314,6 @@ function renderCycle(d) {
       { label: "Realized", num: true, html: r => signed(r.realized, 4) },
       { label: "Fees", num: true, html: r => fmt(r.fees, 6) },
     ], books, "")}</div>
-    <h3>Adds</h3>
-    <div class="scroll">${table([
-      { label: "ID", html: r => esc(r.id) }, { label: "Side", html: r => sideLabel(r.side) },
-      { label: "Qty", num: true, html: r => `${fmt(r.filled)} / ${fmt(r.qty)}` },
-      { label: "Entry", num: true, html: r => fmt(r.price) }, { label: "Exit", num: true, html: r => fmt(r.exit_price) },
-      { label: "State", html: r => badge(ADD_STATES[r.state] || "neutral", r.state.replace("_", " ").toLowerCase()) },
-      { label: "Result (net)", num: true, html: r => signed(r.result, 4) },
-      { label: "Note", html: r => esc(r.note) },
-    ], [...c.adds].reverse(), "No adds yet. Levels open adds once the base hedge is formed.")}</div>
-    <h3>Levels</h3>
-    <div class="scroll">${table([
-      { label: "ID", html: r => esc(r.id) }, { label: "Kind", html: r => esc(r.kind) },
-      { label: "Source", html: r => r.source === "auto" ? "pivot (auto)" : "manual" },
-      { label: "Price", num: true, html: r => fmt(r.price) },
-      { label: "Exit", num: true, html: r => r.exit_price ? fmt(r.exit_price) : "default" },
-      { label: "Status", html: r => r.add_id ? badge("warning", `busy · ${r.add_id}`) : badge("good", "armed") },
-    ], c.levels, "No levels. Add one with python -m stair level add resistance <price>.")}</div>
     <h3>Working orders</h3>
     <div class="scroll">${table([
       { label: "Client ID", html: r => `<span class="mono">${esc(r.client_id)}</span>` },
@@ -307,7 +331,10 @@ function renderChart(d) {
   if (!d.closed.length) { box.innerHTML = ""; chartPoints = []; return; }
   let run = 0;
   chartPoints = d.closed.map((c, i) => ({ i, c, net: Number(c.net), cum: (run += Number(c.net)) }));
-  const W = Math.max(box.clientWidth, 280), H = 200, L = 56, R = 16, T = 12, B = 26;
+  // Geometry in rem, converted to the px the viewBox uses, so the chart scales with the root font size.
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const W = Math.max(box.clientWidth, 17.5 * rem), H = 12.5 * rem;
+  const L = 3.5 * rem, R = rem, T = 0.75 * rem, B = 1.625 * rem, hair = rem / 16, line = rem / 8;
   const ys = chartPoints.map(p => p.cum).concat([0]);
   let lo = Math.min(...ys), hi = Math.max(...ys);
   if (lo === hi) { lo -= 1; hi += 1; }
@@ -316,20 +343,20 @@ function renderChart(d) {
   const x = i => n === 1 ? L + (W - L - R) / 2 : L + i * (W - L - R) / (n - 1);
   const y = v => T + (hi - v) * (H - T - B) / (hi - lo);
   const ticks = [lo + (hi - lo) * 0.1, (lo + hi) / 2, hi - (hi - lo) * 0.1]
-    .filter(t => Math.abs(y(t) - y(0)) > 14);  // keep tick labels clear of the zero label
-  const grid = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)" stroke-width="1"/>
-    <text class="tick" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${fmt(t, 2)}</text>`).join("");
-  const zero = `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)" stroke-width="1"/>
-    <text class="tick" x="${L - 8}" y="${y(0) + 4}" text-anchor="end">0</text>`;
+    .filter(t => Math.abs(y(t) - y(0)) > 0.875 * rem);  // keep tick labels clear of the zero label
+  const grid = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)" stroke-width="${hair}"/>
+    <text class="tick" x="${L - rem / 2}" y="${y(t) + rem / 4}" text-anchor="end">${fmt(t, 2)}</text>`).join("");
+  const zero = `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)" stroke-width="${hair}"/>
+    <text class="tick" x="${L - rem / 2}" y="${y(0) + rem / 4}" text-anchor="end">0</text>`;
   const path = chartPoints.map((p, k) => `${k ? "L" : "M"}${x(p.i)},${y(p.cum)}`).join(" ");
-  const dots = chartPoints.map(p => `<circle cx="${x(p.i)}" cy="${y(p.cum)}" r="4" fill="var(--series-1)" stroke="var(--surface)" stroke-width="2"/>`).join("");
+  const dots = chartPoints.map(p => `<circle cx="${x(p.i)}" cy="${y(p.cum)}" r="${rem / 4}" fill="var(--series-1)" stroke="var(--surface)" stroke-width="${line}"/>`).join("");
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Running total of closed cycle net results">
       ${grid}${zero}
-      <path d="${path}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${path}" fill="none" stroke="var(--series-1)" stroke-width="${line}" stroke-linejoin="round" stroke-linecap="round"/>
       ${dots}
-      <line id="xh" y1="${T}" y2="${H - B}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>
-      <text class="tick" x="${L}" y="${H - 6}">oldest</text><text class="tick" x="${W - R}" y="${H - 6}" text-anchor="end">newest</text>
-      <rect x="${L - 10}" y="0" width="${W - L - R + 20}" height="${H}" fill="transparent" id="hit"/>
+      <line id="xh" y1="${T}" y2="${H - B}" stroke="var(--axis)" stroke-width="${hair}" visibility="hidden"/>
+      <text class="tick" x="${L}" y="${H - 0.375 * rem}">oldest</text><text class="tick" x="${W - R}" y="${H - 0.375 * rem}" text-anchor="end">newest</text>
+      <rect x="${L - 0.625 * rem}" y="0" width="${W - L - R + 1.25 * rem}" height="${H}" fill="transparent" id="hit"/>
     </svg><div class="tooltip" id="tip"></div>`;
   const hit = box.querySelector("#hit"), tip = box.querySelector("#tip"), xh = box.querySelector("#xh");
   const svg = box.querySelector("svg");
@@ -343,8 +370,8 @@ function renderChart(d) {
       Net <b>${signed(best.net, 4)}</b> USDT<br>Running total <b>${signed(best.cum, 4)}</b> USDT`;
     tip.style.display = "block";
     const left = x(best.i) * rect.width / W;
-    tip.style.left = `${Math.min(left + 12, rect.width - tip.offsetWidth - 4)}px`;
-    tip.style.top = `${Math.max(0, y(best.cum) * rect.height / H - 30)}px`;
+    tip.style.left = `${Math.min(left + 0.75 * rem, rect.width - tip.offsetWidth - rem / 4)}px`;  // measured px
+    tip.style.top = `${Math.max(0, y(best.cum) * rect.height / H - 1.875 * rem)}px`;
   });
   hit.addEventListener("mouseleave", () => { tip.style.display = "none"; xh.setAttribute("visibility", "hidden"); });
 }
@@ -358,7 +385,6 @@ function renderClosed(d) {
     { label: "Branch", html: r => esc(r.branch || "–") },
     { label: "Closed", html: r => time(r.finished) },
     { label: "Duration", num: true, html: r => duration(r.started, r.finished) },
-    { label: "Adds", num: true, html: r => `${r.adds_closed} · ${signed(r.adds_result, 4)}` },
     { label: "Realized", num: true, html: r => signed(r.realized, 4) },
     { label: "Fees", num: true, html: r => fmt(r.fees, 6) },
     { label: "Funding", num: true, html: r => signed(r.funding, 6) },
@@ -366,44 +392,23 @@ function renderClosed(d) {
   ], [...d.closed].reverse(), "No closed cycles yet.");
 }
 
-function renderEvents(d) {
-  document.getElementById("events").innerHTML = `<div class="events">${table([
-    { label: "Time", html: r => new Date(r.ts * 1000).toLocaleTimeString() },
-    { label: "Cycle", html: r => `<span class="mono">${esc(r.cycle || "–")}</span>` },
-    { label: "Event", html: r => r.kind === "signal" ? badge("warning", "signal") : esc(r.kind) },
-    { label: "Details", html: r => `<span class="payload mono">${esc(String(r.payload).slice(0, 220))}</span>` },
-  ], d.events, "No events yet.")}</div>`;
-}
-
-let last = null;
+let last = null, pageVersion = null;
 async function refresh() {
   try {
     const res = await fetch("/api/state", { cache: "no-store" });
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || res.status);
+    if (pageVersion !== null && d.page_version !== pageVersion) return location.reload();  // page was edited
+    pageVersion = d.page_version;
     last = d;
-    renderHeader(d); renderBanners(d); renderTiles(d); renderPositions(d); renderCycle(d);
-    renderChart(d); renderClosed(d); renderEvents(d);
+    renderHeader(d); renderBanners(d); renderTiles(d); renderPositions(d);
+    renderChart(d); renderClosed(d);
   } catch (err) {
     document.getElementById("banners").innerHTML =
       `<div class="banner">${badge("critical", "Dashboard offline")} &nbsp;Cannot reach the dashboard server (${esc(err.message || err)}). Is <span class="mono">python -m stair dashboard</span> running?</div>`;
   }
 }
 
-const themes = ["auto", "light", "dark"];
-let theme = "auto";
-try { theme = localStorage.getItem("stair-theme") || "auto"; } catch (e) {}
-function applyTheme() {
-  if (theme === "auto") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.setAttribute("data-theme", theme);
-  document.getElementById("theme").textContent = `Theme: ${theme}`;
-}
-document.getElementById("theme").addEventListener("click", () => {
-  theme = themes[(themes.indexOf(theme) + 1) % themes.length];
-  try { localStorage.setItem("stair-theme", theme); } catch (e) {}
-  applyTheme();
-});
-applyTheme();
 window.addEventListener("resize", () => last && renderChart(last));
 refresh();
 setInterval(refresh, 3000);

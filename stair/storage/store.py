@@ -3,6 +3,7 @@ State lives on disk so a restart can reconcile instead of starting blind (sectio
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 from ..core.models import Trade
 from ..core.serde import from_plain, to_plain
 from ..strategy.engine import Cycle
+
+journal = logging.getLogger("stair.journal")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -75,8 +78,10 @@ class Store:
     # event log
 
     def log(self, kind: str, payload=None, cycle_id: str | None = None) -> None:
+        text = json.dumps(to_plain(payload))
         self._db.execute("INSERT INTO events(ts, cycle_id, kind, payload) VALUES(?, ?, ?, ?)",
-                         (time.time(), cycle_id, kind, json.dumps(to_plain(payload))))
+                         (time.time(), cycle_id, kind, text))
+        journal.info("%-8s %-8s %s", cycle_id or "-", kind, text)  # the run command writes it to a file
 
     def recent_events(self, limit: int = 30) -> list[tuple]:
         return self._db.execute("SELECT ts, cycle_id, kind, payload FROM events ORDER BY id DESC LIMIT ?",

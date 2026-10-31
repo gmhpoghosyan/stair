@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
@@ -11,17 +12,24 @@ from .data import DashboardData
 log = logging.getLogger("stair.dashboard")
 
 
+class _Server(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second dashboard bind the same port and silently share it.
+    allow_reuse_address = os.name != "nt"
+
+
 def make_server(data: DashboardData, port: int, host: str = "127.0.0.1") -> ThreadingHTTPServer:
-    page = resources.files(__package__).joinpath("static/index.html").read_bytes()
+    page = resources.files(__package__).joinpath("static/index.html")
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = self.path.split("?")[0]
             if path in ("/", "/index.html"):
-                self._send(200, "text/html; charset=utf-8", page)
+                self._send(200, "text/html; charset=utf-8", page.read_bytes())  # edits show on reload
             elif path == "/api/state":
                 try:
-                    body = json.dumps(data.snapshot()).encode()
+                    # The page reloads itself when this version changes, so page edits apply on their own.
+                    state = {**data.snapshot(), "page_version": os.stat(page).st_mtime_ns}
+                    body = json.dumps(state).encode()
                 except Exception as exc:  # report instead of dropping the connection
                     log.exception("state failed")
                     self._send(500, "application/json", json.dumps({"error": str(exc)}).encode())
@@ -41,4 +49,4 @@ def make_server(data: DashboardData, port: int, host: str = "127.0.0.1") -> Thre
         def log_message(self, fmt, *args) -> None:
             pass
 
-    return ThreadingHTTPServer((host, port), Handler)
+    return _Server((host, port), Handler)

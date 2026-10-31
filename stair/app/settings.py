@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.serde import from_plain
-from ..levels import LevelConfig
 from ..strategy import StrategyConfig
 
 LIVE_CONFIRM_VAR = "STAIR_LIVE_CONFIRM"
@@ -25,7 +24,6 @@ class Settings:
     trigger_price: str
     reconcile_every_s: float
     strategy: StrategyConfig
-    levels: LevelConfig
 
     @property
     def db_path(self) -> Path:
@@ -71,5 +69,4 @@ def load_settings(config_path: Path = Path("config.toml"), env_path: Path = Path
                     fast_poll_interval_s=float(runtime.get("fast_poll_interval_s", 0.25)),
                     trigger_price=runtime.get("trigger_price", "book"),
                     reconcile_every_s=float(runtime.get("reconcile_every_s", 15.0)),
-                    strategy=from_plain(StrategyConfig, config.get("strategy", {})),
-                    levels=from_plain(LevelConfig, config.get("levels", {})))
+                    strategy=from_plain(StrategyConfig, config.get("strategy", {})))

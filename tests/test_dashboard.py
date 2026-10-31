@@ -30,7 +30,7 @@ def test_dashboard_http_endpoints(tmp_path, gateway):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
     try:
-        assert b"stair dashboard" in urllib.request.urlopen(base + "/").read()
+        assert b"Stair dashboard" in urllib.request.urlopen(base + "/").read()
         state = json.loads(urllib.request.urlopen(base + "/api/state").read())
         assert state["cycle"] is None and state["env"] == "demo"
     finally:

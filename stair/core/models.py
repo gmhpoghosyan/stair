@@ -32,22 +32,9 @@ class CycleState(str, Enum):
     FINISHED = "FINISHED"
 
 
-class AddState(str, Enum):
-    """Add (добор) states from spec section 8."""
-    PENDING_ENTRY = "PENDING_ENTRY"
-    PARTIAL_ENTRY = "PARTIAL_ENTRY"
-    OPEN = "OPEN"
-    PENDING_EXIT = "PENDING_EXIT"
-    PARTIAL_EXIT = "PARTIAL_EXIT"
-    CLOSED = "CLOSED"
-    ERROR = "ERROR"
-
-
 class Purpose(str, Enum):
     ENTRY = "ENTRY"
     HEDGE = "HEDGE"
-    ADD_OPEN = "ADD_OPEN"
-    ADD_EXIT = "ADD_EXIT"
     CLOSE = "CLOSE"
 
 
@@ -94,7 +81,6 @@ class Order:
     order_type: str = "LIMIT"  # LIMIT | MARKET
     price: Decimal | None = None
     tif: str | None = None  # GTC | GTX (post-only)
-    add_id: str | None = None
     status: OrderStatus = OrderStatus.PENDING
     filled: Decimal = ZERO
     notional: Decimal = ZERO

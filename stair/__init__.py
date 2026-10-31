@@ -1,1 +1,1 @@
-"""stair: hedge cycles with repeated adds on Binance USD-M futures."""
+"""stair: hedged entry cycles on Binance USD-M futures."""

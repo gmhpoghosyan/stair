@@ -6,6 +6,7 @@ import pytest
 from conftest import fill, places
 from stair.core.models import CycleState, Order, Purpose, Side
 from stair.exchange.binance import BinanceFutures, order_params
+from stair.app.reload import SourceWatcher
 from stair.exchange import UnknownResult
 from stair.execution import Runner
 from stair.storage import Store
@@ -13,7 +14,7 @@ from stair.strategy import StrategyConfig
 
 
 def test_t07_hedge_orders_carry_position_side_and_no_reduce_only():
-    reduce_short = Order("st-x-X1", Purpose.ADD_EXIT, Side.SHORT, False, D("0.10"), price=D("104.50"), tif="GTC")
+    reduce_short = Order("st-x-C1", Purpose.CLOSE, Side.SHORT, False, D("0.10"), price=D("104.50"), tif="GTC")
     params = order_params("SOLUSDT", reduce_short)
     assert params["side"] == "BUY" and params["positionSide"] == "SHORT"
     assert "reduceOnly" not in params
@@ -32,7 +33,6 @@ def test_signature_matches_binance_documented_example():
 def test_snapshot_round_trip(tmp_path, cycle):
     entry = places(cycle.enter(Side.LONG, D("1"), D("100"), post_only=False))[0]
     fill(cycle, entry.client_id, "1", "100", "0.02")
-    cycle.add_level(Side.SHORT, D("105"))
     store = Store(tmp_path / "t.sqlite")
     store.save_cycle(cycle)
     loaded = store.load_cycle()
@@ -188,3 +188,21 @@ def test_failed_call_mid_tick_still_saves_applied_fills(runner, gateway):
     with pytest.raises(UnknownResult):
         runner.tick(2.0)
     assert runner.store.load_cycle().state is CycleState.SINGLE_POSITION
+
+
+def test_source_watcher_sees_a_config_edit(tmp_path):
+    import os
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("leverage = 10")
+    watcher = SourceWatcher([cfg], every_s=0)
+    assert not watcher.changed()
+    mtime = cfg.stat().st_mtime_ns
+    os.utime(cfg, ns=(mtime, mtime + 1_000_000_000))
+    assert watcher.changed() and watcher.changed()  # stays fired until the restart
+
+
+def test_run_returns_between_ticks_when_asked_to_stop(runner):
+    ticks = []
+    runner.tick = ticks.append
+    runner.run(0.0, stop=lambda: len(ticks) >= 2)
+    assert len(ticks) == 2
