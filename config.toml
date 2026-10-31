@@ -1,0 +1,33 @@
+[exchange]
+env = "demo"                  # demo | live. Live also needs STAIR_LIVE_CONFIRM (R15)
+
+[runtime]
+data_dir = "data"
+poll_interval_s = 1.0
+fast_poll_interval_s = 0.25     # while unhedged (entry working, single position, hedge pending, closing)
+trigger_price = "book"        # Q10: book (executable bid/ask) | last | mark
+reconcile_every_s = 15.0
+
+[strategy]
+symbol = "NEARUSDT"           # Q05
+leverage = 10                 # R03
+hedge_spread = "0.005"        # h: net positive spread after both opening fees (R05, R18)
+adverse_move = "0.003"        # a: negative hedge trigger, price move before costs (R06, Q26)
+# hedge_fee_rate = "0.0004"   # fH; unset = exchange taker rate
+negative_hedge_order = "MARKET"  # Q09: MARKET | LIMIT
+hedge_max_attempts = 3
+add_fraction = "0.1"          # R09
+add_exit_pct = "0.005"        # Q13: default add take-profit when a level has no --exit
+max_adds_per_side = 3         # Q14
+require_avg_improvement = true  # Q28
+retry_cooldown_s = 5.0
+
+[levels]
+# Auto support/resistance from confirmed pivots (LuxAlgo "Support and Resistance Levels with Breaks" logic).
+# The latest resistance opens SHORT adds, the latest support opens LONG adds (R08); manual levels still work.
+enabled = true
+interval = "30m"              # R12: 30m or 1h working levels
+left_bars = 15
+right_bars = 15
+volume_thresh = 20.0          # break signals need volume osc above this
+refresh_s = 60.0
