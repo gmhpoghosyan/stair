@@ -35,6 +35,8 @@ class CycleState(str, Enum):
 class Purpose(str, Enum):
     ENTRY = "ENTRY"
     HEDGE = "HEDGE"
+    ADD = "ADD"
+    ADD_EXIT = "ADD_EXIT"
     CLOSE = "CLOSE"
 
 
@@ -81,6 +83,7 @@ class Order:
     order_type: str = "LIMIT"  # LIMIT | MARKET
     price: Decimal | None = None
     tif: str | None = None  # GTC | GTX (post-only)
+    add_id: str | None = None  # ADD / ADD_EXIT orders: the add they belong to
     status: OrderStatus = OrderStatus.PENDING
     filled: Decimal = ZERO
     notional: Decimal = ZERO

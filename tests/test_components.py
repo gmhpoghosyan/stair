@@ -4,7 +4,7 @@ from decimal import Decimal as D
 import pytest
 
 from conftest import fill, places
-from stair.core.models import CycleState, Order, Purpose, Side
+from stair.core.models import CycleState, Order, OrderStatus, Purpose, Side
 from stair.exchange.binance import BinanceFutures, order_params
 from stair.app.reload import SourceWatcher
 from stair.exchange import UnknownResult
@@ -206,3 +206,21 @@ def test_run_returns_between_ticks_when_asked_to_stop(runner):
     runner.tick = ticks.append
     runner.run(0.0, stop=lambda: len(ticks) >= 2)
     assert len(ticks) == 2
+
+
+def test_runner_rests_adds_on_the_exchange_and_exits_on_fill(runner, gateway):
+    cycle = _entered(runner, gateway)
+    gateway.execute(cycle.entry_id, "1", "100")
+    runner.tick(2.0)
+    gateway.book.bid, gateway.book.ask = D("100.6"), D("100.61")
+    runner.tick(3.0)
+    gateway.execute(cycle.hedge_ids[0], "1", "100.5")
+    runner.tick(4.0)  # HEDGED, then both adds go out as resting limits in the same tick
+    resting = {o["order"].position_side: o["order"] for o in gateway.orders.values()
+               if o["order"].purpose is Purpose.ADD and o["status"] is OrderStatus.NEW}
+    assert resting[Side.SHORT].price == D("101.51") and resting[Side.LONG].price == D("99")
+    gateway.execute(resting[Side.SHORT].client_id, "0.1", "101.51")
+    runner.tick(5.0)
+    exits = [o["order"] for o in gateway.orders.values() if o["order"].purpose is Purpose.ADD_EXIT]
+    assert [(e.position_side, e.side, e.price) for e in exits] == [(Side.SHORT, "BUY", D("101.00"))]
+    assert cycle.books[Side.SHORT].qty == D("1.1") and cycle.recovery is None

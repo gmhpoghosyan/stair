@@ -16,4 +16,10 @@ adverse_move = "0.003"        # a: negative hedge trigger, price move before cos
 # hedge_fee_rate = "0.0004"   # fH; unset = exchange taker rate
 negative_hedge_order = "MARKET"  # Q09: MARKET | LIMIT
 hedge_max_attempts = 3
+# After the hedge forms, each leg takes one add of add_fraction x Q0 at a time: SHORT when price is
+# add_trigger_pct above the short entry price, LONG when it is that far below the long entry price.
+# The add closes when it nets add_exit_pct after its own fees; the leg's entry price then includes it.
+add_fraction = "0.1"
+add_trigger_pct = "0.01"
+add_exit_pct = "0.005"
 retry_cooldown_s = 5.0

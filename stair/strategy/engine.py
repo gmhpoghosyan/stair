@@ -1,4 +1,4 @@
-"""Cycle state machine: first entry -> base hedge -> manual close.
+"""Cycle state machine: first entry -> base hedge -> adds on each leg -> manual close.
 
 Pure logic with no I/O. The execution component feeds fills, order statuses and
 quotes in and sends the returned intents to an exchange gateway. The backtest is
@@ -16,7 +16,7 @@ from ..core.models import (ZERO, Cancel, CycleState, Fill, Intent, MarketRules, 
 from .config import StrategyConfig
 
 POSITIVE, NEGATIVE = "positive", "negative"
-_CODES = {Purpose.ENTRY: "E", Purpose.HEDGE: "H", Purpose.CLOSE: "C"}
+_CODES = {Purpose.ENTRY: "E", Purpose.HEDGE: "H", Purpose.ADD: "A", Purpose.ADD_EXIT: "X", Purpose.CLOSE: "C"}
 
 
 class EngineError(Exception):
@@ -44,6 +44,21 @@ class Book:
 
 
 @dataclass
+class Add:
+    """add_fraction x Q0 on one leg, opened at the leg's trigger and closed at its own exit.
+    A leg has at most one live add; the next one waits until this one is closed."""
+    id: str
+    side: Side
+    entry_id: str
+    trigger: Decimal
+    exit_price: Decimal | None = None  # fixed once the entry is final
+    exit_id: str | None = None  # working exit order, if any
+    exit_ids: list[str] = field(default_factory=list)
+    closed: bool = False
+    note: str = ""
+
+
+@dataclass
 class Cycle:
     id: str
     cfg: StrategyConfig
@@ -57,6 +72,7 @@ class Cycle:
     branch: str | None = None  # POSITIVE | NEGATIVE, locked once chosen (R17)
     books: dict[Side, Book] = field(default_factory=lambda: {Side.LONG: Book(), Side.SHORT: Book()})
     orders: dict[str, Order] = field(default_factory=dict)
+    adds: list[Add] = field(default_factory=list)
     seq: int = 0
     resume_state: CycleState | None = None
     recovery: str | None = None  # reason while halted for reconciliation
@@ -118,6 +134,41 @@ class Cycle:
     def negative_threshold(self) -> Decimal:
         raw = pricing.negative_hedge_price(self.first_side, self.e0, self.cfg.adverse_move)
         return pricing.round_to(raw, self.rules.tick_size, up=self.first_side is Side.SHORT)
+
+    def add_trigger(self, side: Side) -> Decimal | None:
+        """add_trigger_pct beyond the leg's entry price as the exchange shows it (no fees). Rounded away
+        from the market, so the move is at least the full percentage."""
+        book = self.books[side]
+        if not book.qty:
+            return None
+        raw = pricing.add_trigger_price(side, book.avg, self.cfg.add_trigger_pct)
+        return pricing.round_to(raw, self.rules.tick_size, up=side is Side.SHORT)
+
+    def add_qty(self, price: Decimal) -> Decimal | None:
+        """add_fraction x Q0 rounded down to the lot step; None below exchange minimums (never rounded up)."""
+        q = pricing.round_to(self.q0 * self.cfg.add_fraction, self.rules.step_size, up=False)
+        if q < self.rules.min_qty or q * price < self.rules.min_notional:
+            return None
+        return q
+
+    def add_exit(self, add: Add) -> Decimal:
+        """Exit that nets add_exit_pct on the add after its actual entry fee and a maker exit fee
+        (the exit is a resting limit order). Rounded so the net is at least the target."""
+        entry = self.orders[add.entry_id]
+        raw = pricing.add_exit_price(add.side, entry.avg_price, entry.commission / entry.filled,
+                                     self.rules.maker_fee, self.cfg.add_exit_pct)
+        return pricing.round_to(raw, self.rules.tick_size, up=add.side is Side.LONG)
+
+    def add_result(self, add: Add) -> Decimal:
+        """Closed part of the add net of its own fees (its share of the entry fee plus exit fees)."""
+        entry = self.orders[add.entry_id]
+        exits = [self.orders[x] for x in add.exit_ids]
+        closed = sum((o.filled for o in exits), ZERO)
+        if not closed:
+            return ZERO
+        exit_avg = sum((o.notional for o in exits), ZERO) / closed
+        return (pricing.side_pnl(add.side, closed, entry.avg_price, exit_avg)
+                - entry.commission * closed / entry.filled - sum((o.commission for o in exits), ZERO))
 
     # ---- commands -------------------------------------------------------
 
@@ -187,6 +238,8 @@ class Cycle:
             return []  # price-driven decisions wait for reconciliation
         if self.state in (CycleState.ENTRY_PARTIAL, CycleState.SINGLE_POSITION):
             return self._check_hedge_triggers()
+        if self.state is CycleState.HEDGED:
+            return self._manage_adds()
         if self.state is CycleState.CLOSING:
             return self._close_progress()
         return []
@@ -220,6 +273,8 @@ class Cycle:
             out = self._entry_progress(order)
         elif order.purpose is Purpose.HEDGE:
             out = self._hedge_progress(order)
+        elif order.purpose in (Purpose.ADD, Purpose.ADD_EXIT):
+            out = self._add_progress(order)
         else:
             out = []
             if order.is_terminal and order.filled < order.qty:
@@ -305,6 +360,76 @@ class Cycle:
         fees = sum((o.commission for o in hedges), ZERO)
         return pricing.gross_hedge_spread(self.first_side, self.e0, filled, avg) - self.f0 - fees
 
+    # adds
+
+    def _live_add(self, side: Side) -> Add | None:
+        return next((a for a in self.adds if a.side is side and not a.closed), None)
+
+    def _exit_filled(self, add: Add) -> Decimal:
+        return sum((self.orders[x].filled for x in add.exit_ids), ZERO)
+
+    def _manage_adds(self) -> list[Intent]:
+        out: list[Intent] = []
+        for side in Side:
+            add = self._live_add(side)
+            if add is None:
+                if self._ready(f"add:{side.value}"):
+                    out += self._place_add(side)
+                continue
+            entry = self.orders[add.entry_id]
+            if not entry.is_terminal:
+                if entry.filled and self._exit_reached(add):
+                    out += self._cancel(entry)  # partly filled and already back at its exit: take what filled
+            elif add.exit_id is None and self._ready(f"exit:{add.id}"):
+                out.append(self._place_add_exit(add))
+        return out
+
+    def _place_add(self, side: Side) -> list[Intent]:
+        """A resting limit at the trigger: it fills when price gets there, even while the bot is offline."""
+        trigger = self.add_trigger(side)
+        qty = self.add_qty(trigger) if trigger is not None else None
+        if qty is None:
+            return []
+        order = self._order(Purpose.ADD, side, True, qty, price=trigger, tif="GTC")
+        add = Add(id=f"a{self.seq}", side=side, entry_id=order.client_id, trigger=trigger)
+        order.add_id = add.id
+        self.adds.append(add)
+        return [Place(order)]
+
+    def _exit_reached(self, add: Add) -> bool:
+        target = self.add_exit(add)
+        return self.ask <= target if add.side is Side.SHORT else self.bid >= target
+
+    def _place_add_exit(self, add: Add) -> Place:
+        if add.exit_price is None:
+            add.exit_price = self.add_exit(add)
+        remaining = self.orders[add.entry_id].filled - self._exit_filled(add)
+        order = self._order(Purpose.ADD_EXIT, add.side, False, remaining, price=add.exit_price, tif="GTC")
+        order.add_id = add.id
+        add.exit_id = order.client_id
+        add.exit_ids.append(order.client_id)
+        return Place(order)
+
+    def _add_progress(self, order: Order) -> list[Intent]:
+        add = next(a for a in self.adds if a.id == order.add_id)
+        if order.purpose is Purpose.ADD:
+            if not order.is_terminal:
+                return []
+            if order.filled == 0:
+                add.closed = True
+                add.note = f"entry {order.status.value} {order.reason or ''}".strip()
+                if order.status is OrderStatus.REJECTED:
+                    self._cooldown(f"add:{add.side.value}")
+                return []
+            return [] if self.state is CycleState.CLOSING else [self._place_add_exit(add)]
+        if self._exit_filled(add) >= self.orders[add.entry_id].filled:
+            # Closed. The leg's entry price keeps this add in its average, so the next trigger moves with it.
+            add.closed, add.exit_id = True, None
+        elif order.is_terminal:
+            add.exit_id = None  # re-placed for the remainder after the cooldown
+            self._cooldown(f"exit:{add.id}")
+        return []
+
     # close
 
     def _close_progress(self) -> list[Intent]:
@@ -339,6 +464,13 @@ class Cycle:
         thresholds = None
         if self.q0 and self.state in (CycleState.ENTRY_PARTIAL, CycleState.SINGLE_POSITION):
             thresholds = {"positive": self.positive_threshold(), "negative": self.negative_threshold()}
+        add_triggers = None  # per leg: where the next add happens; None while that leg's add is open
+        if self.state is CycleState.HEDGED:
+            add_triggers = {}
+            for side in Side:
+                add = self._live_add(side)
+                waiting = add is not None and not self.orders[add.entry_id].filled
+                add_triggers[side.value] = add.trigger if waiting else None if add else self.add_trigger(side)
         return {
             "cycle": self.id, "state": self.display_state.value, "note": self.note,
             "recovery": self.recovery, "first_side": self.first_side and self.first_side.value,
@@ -346,6 +478,8 @@ class Cycle:
             "thresholds": thresholds, "base_net_spread": self.base_net_spread(),
             "long": long, "short": short, "delta": self.delta,
             "spread_of_averages": short.avg - long.avg if long.qty and short.qty else None,
+            "add_triggers": add_triggers,
+            "closed_adds_result": sum((self.add_result(a) for a in self.adds), ZERO),
             "realized": realized, "unrealized": unrealized, "fees": fees, "funding": self.funding,
             "total": None if unrealized is None else realized + unrealized + self.funding - fees,
             "bid": self.bid, "ask": self.ask,

@@ -33,6 +33,20 @@ def net_hedge_spread(first: Side, e0: Decimal, q0: Decimal, f0: Decimal,
     return gross_hedge_spread(first, e0, q0, hedge_price) - f0 - q0 * hedge_price * fee_rate
 
 
+def add_trigger_price(side: Side, leg_avg: Decimal, pct: Decimal) -> Decimal:
+    """Where a leg takes an add: `pct` above the SHORT leg's entry price, `pct` below the LONG leg's."""
+    return leg_avg * (ONE + pct) if side is Side.SHORT else leg_avg * (ONE - pct)
+
+
+def add_exit_price(side: Side, entry: Decimal, entry_fee_per_coin: Decimal, exit_fee_rate: Decimal,
+                   net_pct: Decimal) -> Decimal:
+    """Exit that leaves `net_pct` of the add's entry notional after its entry fee and the exit fee.
+    SHORT add: q(entry - x) - F_in - q·x·f = pct·q·entry, solved for x; LONG is the mirror."""
+    if side is Side.SHORT:
+        return (entry * (ONE - net_pct) - entry_fee_per_coin) / (ONE + exit_fee_rate)
+    return (entry * (ONE + net_pct) + entry_fee_per_coin) / (ONE - exit_fee_rate)
+
+
 def round_to(value: Decimal, step: Decimal, up: bool) -> Decimal:
     units = (value / step).to_integral_value(rounding=ROUND_CEILING if up else ROUND_FLOOR)
     return units * step

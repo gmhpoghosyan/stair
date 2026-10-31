@@ -272,4 +272,8 @@ class Runner:
         if crosses:
             note = (" (post-only will be rejected: price crosses the book)" if post_only
                     else " (crosses the book: fills now as taker, see Q07)")
+        add_qty = pricing.round_to(qty * self.cfg.add_fraction, rules.step_size, up=False)
+        if add_qty < rules.min_qty or add_qty * price < rules.min_notional:
+            note += (f"; warning: adds of {add_qty} are below exchange minimums (min qty {rules.min_qty}, "
+                     f"min notional {rules.min_notional}) and will be skipped")
         return f"cycle {cycle.id}: {side.value} {qty} @ {price}{' post-only' if post_only else ''}{note}"

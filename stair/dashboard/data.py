@@ -10,7 +10,7 @@ from ..core.models import Side
 from ..core.serde import to_plain
 from ..exchange import ExchangeError, ExchangeGateway, UnknownResult
 from ..storage import Store
-from ..strategy import Cycle
+from ..strategy import Add, Cycle
 
 
 def cycle_view(cycle: Cycle) -> dict:
@@ -18,12 +18,27 @@ def cycle_view(cycle: Cycle) -> dict:
     view.update({
         "created_at": cycle.created_at,
         "symbol": cycle.rules.symbol,
+        "adds": [add_view(cycle, a) for a in reversed(cycle.adds)],
         "orders": [{"client_id": o.client_id, "purpose": o.purpose, "side": o.side,
                     "position_side": o.position_side, "qty": o.qty, "filled": o.filled,
                     "price": o.price, "type": o.order_type, "tif": o.tif, "status": o.status}
                    for o in cycle.orders.values() if not o.is_terminal],
     })
     return view
+
+
+def add_view(cycle: Cycle, add: Add) -> dict:
+    entry = cycle.orders[add.entry_id]
+    if add.closed:
+        state = "closed" if entry.filled else "cancelled"
+    elif entry.filled < entry.qty and not entry.is_terminal:
+        state = "partly filled" if entry.filled else "waiting at trigger"
+    else:
+        state = "open, exit working" if add.exit_id else "open"
+    exit_price = add.exit_price or (cycle.add_exit(add) if entry.filled else None)
+    return {"id": add.id, "side": add.side, "qty": entry.qty, "filled": entry.filled, "trigger": add.trigger,
+            "entry_price": entry.avg_price, "exit_price": exit_price, "state": state,
+            "result": cycle.add_result(add), "note": add.note}
 
 
 def closed_view(finished_ts: float, cycle: Cycle) -> dict:

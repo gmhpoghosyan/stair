@@ -5,6 +5,12 @@ A manual first entry is hedged by an equal opposite position as soon as the pric
 threshold (a fee-adjusted net spread) or the negative threshold (an adverse move). The hedged pair is held until
 you close it.
 
+While hedged, each leg takes adds of 1/10 Q0, one at a time. The SHORT leg adds when the price is 1% above its
+entry price, and the LONG leg adds when it is 1% below its entry price. Each add closes once it nets 0.5% after its
+own fees. The leg's entry price keeps the add in its average, so the next trigger moves with it. Example: long 100,
+short 100.5 → SHORT add at 101.505, closed near 100.997; the short entry becomes 100.591, so the next add is at
+101.597.
+
 Status: **demo stage** (R15). Live trading is locked behind an explicit switch.
 
 ## Components
@@ -66,7 +72,7 @@ python -m stair dashboard [--port 8765] [--no-exchange] [--no-browser]
 ```
 
 It shows live exchange positions with both hedge legs of a symbol on one line. Opening a row shows the bot's cycle
-(facts, both sides against the exchange, working orders). Closed cycles show net results and a running-total
+(facts, next add triggers, both sides against the exchange, adds, working orders). Closed cycles show net results and a running-total
 chart. It also warns when the bot is stopped while a position is unhedged.
 
 `run` writes two log files to `data/`: `stair-<env>.log` (bot log) and `stair-<env>-journal.log` (every journal

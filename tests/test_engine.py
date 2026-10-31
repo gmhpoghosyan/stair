@@ -107,3 +107,84 @@ def test_unfilled_entry_finishes_cycle(cycle):
     entry = places(cycle.enter(Side.LONG, D("1"), D("100"), post_only=True))[0]
     cycle.on_status(entry.client_id, OrderStatus.REJECTED, "GTX would take")
     assert cycle.state is CycleState.FINISHED
+
+
+def test_adds_follow_the_worked_example_and_move_with_the_leg_average(cycle):
+    # Long 1 @ 100, short hedge 1 @ 100.5, zero fees: SHORT add at 100.5 +1%, LONG add at 100 -1%.
+    hedged(cycle)
+    short_add, long_add = sorted(places(cycle.on_quote(D("100.4"), D("100.41"), 10.0)), key=lambda o: o.side)[::-1]
+    assert (short_add.purpose, short_add.side, short_add.position_side) == (Purpose.ADD, "SELL", Side.SHORT)
+    assert short_add.price == D("101.51") and short_add.qty == D("0.1")  # 101.505 rounded away from market
+    assert (long_add.side, long_add.position_side, long_add.price) == ("BUY", Side.LONG, D("99"))
+    assert places(cycle.on_quote(D("103"), D("103.01"), 11.0)) == []  # one live add per leg
+    exit_order = places(fill(cycle, short_add.client_id, "0.1", "101.505"))[0]
+    assert (exit_order.purpose, exit_order.side, exit_order.position_side) == (Purpose.ADD_EXIT, "BUY", Side.SHORT)
+    assert exit_order.price == D("100.99") and exit_order.qty == D("0.1")  # 101.505 x 0.995 = 100.997, rounded down
+    assert places(cycle.on_quote(D("104"), D("104.01"), 12.0)) == []  # price rising further: nothing new
+    fill(cycle, exit_order.client_id, "0.1", "100.99")
+    short = cycle.books[Side.SHORT]
+    assert short.qty == D("1") and short.avg.quantize(D("0.0001")) == D("100.5914")  # leg price now includes the add
+    short_add_record = next(a for a in cycle.adds if a.side is Side.SHORT)
+    assert short_add_record.closed and cycle.add_result(short_add_record) == D("0.0515")  # 0.1 x (101.505 - 100.99)
+    nxt = places(cycle.on_quote(D("100.9"), D("100.91"), 13.0))
+    assert [(o.position_side, o.price) for o in nxt] == [(Side.SHORT, D("101.60"))]  # 100.5914 x 1.01 = 101.597
+
+
+def test_long_add_mirror_closes_on_the_way_up(cycle):
+    hedged(cycle)
+    long_add = next(o for o in places(cycle.on_quote(D("100.4"), D("100.41"), 10.0)) if o.position_side is Side.LONG)
+    exit_order = places(fill(cycle, long_add.client_id, "0.1", "99"))[0]
+    assert (exit_order.side, exit_order.position_side, exit_order.price) == ("SELL", Side.LONG, D("99.50"))
+    fill(cycle, exit_order.client_id, "0.1", "99.5")
+    assert cycle.books[Side.LONG].avg.quantize(D("0.0001")) == D("99.9091")
+    nxt = [o for o in places(cycle.on_quote(D("100"), D("100.01"), 11.0)) if o.position_side is Side.LONG]
+    assert nxt[0].price == D("98.91")  # 99.9091 x 0.99 = 98.91, rounded down
+
+
+def test_add_exit_is_the_nearest_price_that_nets_the_target_after_fees():
+    from conftest import rules
+    from stair.strategy import Cycle, StrategyConfig
+    maker, taker = D("0.0002"), D("0.0004")
+    cycle = Cycle.new(StrategyConfig(retry_cooldown_s=0), rules(maker=str(maker), taker=str(taker)), now=0.0)
+    entry = places(cycle.enter(Side.LONG, D("1"), D("100"), post_only=False))[0]
+    fill(cycle, entry.client_id, "1", "100", D("100") * taker)
+    hedge = places(cycle.on_quote(D("101"), D("101.01"), 1.0))[0]  # positive threshold, fee-adjusted
+    fill(cycle, hedge.client_id, "1", hedge.price, hedge.price * taker)
+    assert cycle.state is CycleState.HEDGED
+    short_add = next(o for o in places(cycle.on_quote(D("100.9"), D("100.91"), 2.0)) if o.position_side is Side.SHORT)
+    price, q = short_add.price, short_add.qty
+    entry_fee = price * q * maker
+    exit_order = places(fill(cycle, short_add.client_id, q, price, entry_fee))[0]
+
+    def net(x):
+        return q * (price - x) - entry_fee - x * q * maker
+
+    target = D("0.005") * q * price
+    assert net(exit_order.price) >= target > net(exit_order.price + cycle.rules.tick_size)
+
+
+def test_partly_filled_add_is_cut_when_price_is_back_at_its_exit(cycle):
+    hedged(cycle)
+    short_add = next(o for o in places(cycle.on_quote(D("100.4"), D("100.41"), 10.0)) if o.position_side is Side.SHORT)
+    fill(cycle, short_add.client_id, "0.04", "101.51")
+    assert cancels(cycle.on_quote(D("100.9"), D("100.91"), 11.0)) == [short_add.client_id]
+    exit_order = places(cycle.on_status(short_add.client_id, OrderStatus.CANCELED))[0]
+    assert exit_order.qty == D("0.04") and exit_order.purpose is Purpose.ADD_EXIT
+
+
+def test_close_cancels_resting_adds_and_flattens_including_an_open_add(cycle):
+    hedged(cycle)
+    resting = places(cycle.on_quote(D("100.4"), D("100.41"), 10.0))
+    short_add = next(o for o in resting if o.position_side is Side.SHORT)
+    long_add = next(o for o in resting if o.position_side is Side.LONG)
+    exit_order = places(fill(cycle, short_add.client_id, "0.1", "101.51"))[0]
+    out = cycle.close()
+    assert sorted(cancels(out)) == sorted([long_add.client_id, exit_order.client_id]) and not places(out)
+    cycle.on_status(long_add.client_id, OrderStatus.CANCELED)
+    closes = places(cycle.on_status(exit_order.client_id, OrderStatus.CANCELED))
+    assert {o.position_side: o.qty for o in closes} == {Side.LONG: D("1"), Side.SHORT: D("1.1")}
+
+
+def test_no_adds_below_exchange_minimums(cycle):
+    hedged(cycle, q0="0.05")  # add of 0.005 rounds to 0 at step 0.01
+    assert places(cycle.on_quote(D("100.4"), D("100.41"), 10.0)) == []

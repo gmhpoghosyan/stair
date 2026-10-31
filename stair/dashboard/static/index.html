@@ -298,6 +298,9 @@ function cycleDetails(d) {
     ["Spread of averages ES − EL", c.spread_of_averages !== null ? fmt(c.spread_of_averages) : "–"],
     ["Realized", signed(c.realized, 4)], ["Unrealized", signed(c.unrealized, 4)],
     ["Fees", fmt(c.fees, 6)], ["Funding", signed(c.funding, 6)],
+    ...["SHORT", "LONG"].map(s => [`Next ${s} add at`,
+      !c.add_triggers ? "–" : c.add_triggers[s] ? fmt(c.add_triggers[s]) : "add open"]),
+    ["Closed adds result", signed(c.closed_adds_result, 4)],
     ["Total", signed(c.total, 4)],
   ];
   const books = ["LONG", "SHORT"].map(s => ({ side: s, ...c[s.toLowerCase()], ex: ex[s] }));
@@ -314,6 +317,17 @@ function cycleDetails(d) {
       { label: "Realized", num: true, html: r => signed(r.realized, 4) },
       { label: "Fees", num: true, html: r => fmt(r.fees, 6) },
     ], books, "")}</div>
+    <h3>Adds</h3>
+    <div class="scroll">${table([
+      { label: "ID", html: r => esc(r.id) }, { label: "Leg", html: r => sideLabel(r.side) },
+      { label: "Filled / Qty", num: true, html: r => `${fmt(r.filled)} / ${fmt(r.qty)}` },
+      { label: "Trigger", num: true, html: r => fmt(r.trigger) },
+      { label: "Entry", num: true, html: r => fmt(r.entry_price) },
+      { label: "Exit", num: true, html: r => fmt(r.exit_price) },
+      { label: "State", html: r => esc(r.state) },
+      { label: "Result (net)", num: true, html: r => signed(r.result, 4) },
+      { label: "Note", html: r => esc(r.note) },
+    ], c.adds, "No adds yet. Once the hedge forms, each leg rests an add at its trigger.")}</div>
     <h3>Working orders</h3>
     <div class="scroll">${table([
       { label: "Client ID", html: r => `<span class="mono">${esc(r.client_id)}</span>` },

@@ -131,7 +131,14 @@ def cmd_status(s: Settings, args) -> None:
     print(f"delta {_fmt(m['delta'])}  spread of averages ES-EL {_fmt(m['spread_of_averages'])}  "
           f"base net spread {_fmt(m['base_net_spread'])}")
     print(f"bid {_fmt(m['bid'])} ask {_fmt(m['ask'])}  unrealized {_fmt(m['unrealized'])}  "
-          f"funding {_fmt(m['funding'])}  total {_fmt(m['total'])}")
+          f"funding {_fmt(m['funding'])}  total {_fmt(m['total'])}  closed adds {_fmt(m['closed_adds_result'])}")
+    if m["add_triggers"]:
+        print("next adds  " + "  ".join(f"{side} at {_fmt(price)}" for side, price in m["add_triggers"].items() if price))
+    for add in cycle.adds:
+        entry = cycle.orders[add.entry_id]
+        print(f"add {add.id}: {add.side.value} {_fmt(entry.filled)}/{_fmt(entry.qty)} trigger {add.trigger} "
+              f"exit {add.exit_price or '-'} {'closed' if add.closed else 'live'} "
+              f"result {_fmt(cycle.add_result(add))} {add.note}")
     for o in cycle.orders.values():
         if not o.is_terminal:
             print(f"order {o.client_id} {o.purpose.value} {o.side} {o.position_side.value} "
