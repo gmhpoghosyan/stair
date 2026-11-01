@@ -9,7 +9,7 @@ trigger_price = "book"        # Q10: book (executable bid/ask) | last | mark
 reconcile_every_s = 15.0
 
 [strategy]
-symbol = "NEARUSDT"           # Q05
+symbol = "AKEUSDT"            # Q05: default for `enter --symbol`; the bot runs any symbol
 leverage = 10                 # R03
 hedge_spread = "0.005"        # h: net positive spread after both opening fees (R05, R18)
 adverse_move = "0.003"        # a: negative hedge trigger, price move before costs (R06, Q26)

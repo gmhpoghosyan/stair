@@ -35,7 +35,7 @@ def test_snapshot_round_trip(tmp_path, cycle):
     fill(cycle, entry.client_id, "1", "100", "0.02")
     store = Store(tmp_path / "t.sqlite")
     store.save_cycle(cycle)
-    loaded = store.load_cycle()
+    loaded = store.load_cycles()["SOLUSDT"]
     assert loaded == cycle and isinstance(loaded.books[Side.LONG].avg, D)
     assert loaded.positive_threshold() == cycle.positive_threshold()
 
@@ -50,7 +50,7 @@ def runner(tmp_path, gateway):
 def test_runner_full_flow_on_simulated_exchange(runner, gateway):
     runner.store.enqueue("enter", {"side": "long", "qty": "1", "price": "100"})
     runner.tick(1.0)
-    cycle = runner.cycle
+    cycle = runner.cycles["SOLUSDT"]
     entry_id = cycle.entry_id
     gateway.execute(entry_id, "1", "100", fee="0.02")
     runner.tick(2.0)
@@ -62,7 +62,7 @@ def test_runner_full_flow_on_simulated_exchange(runner, gateway):
     gateway.execute(hedge_id, "1", "100.6", fee="0.04")
     runner.tick(4.0)
     assert cycle.state is CycleState.HEDGED and cycle.recovery is None
-    assert runner.store.load_cycle().state is CycleState.HEDGED  # persisted
+    assert runner.store.load_cycles()["SOLUSDT"].state is CycleState.HEDGED  # persisted
     runner.tick(5.0)  # replayed trades are not double counted (T10)
     assert cycle.books[Side.LONG].qty == cycle.books[Side.SHORT].qty == D("1")
     runner.store.enqueue("close", {})
@@ -70,7 +70,7 @@ def test_runner_full_flow_on_simulated_exchange(runner, gateway):
     for cid in [c for c in gateway.orders if "-C" in c]:
         gateway.execute(cid, gateway.orders[cid]["qty"], "100.6")
     runner.tick(7.0)
-    assert runner.cycle is None and runner.store.last_finished_cycle().state is CycleState.FINISHED
+    assert not runner.cycles and runner.store.last_finished_cycle().state is CycleState.FINISHED
 
 
 def test_unknown_place_result_is_queried_not_resent(runner, gateway):
@@ -78,14 +78,14 @@ def test_unknown_place_result_is_queried_not_resent(runner, gateway):
     runner.store.enqueue("enter", {"side": "long", "qty": "1", "price": "100"})
     runner.tick(1.0)  # the same tick's sync finds the order by client id
     runner.tick(2.0)
-    entry = runner.cycle.entry
+    entry = runner.cycles["SOLUSDT"].entry
     assert entry.exchange_id is not None and gateway.place_calls == [entry.client_id]
 
 
 def test_foreign_position_triggers_recovery(runner, gateway):
     runner.store.enqueue("enter", {"side": "long", "qty": "1", "price": "100"})
     runner.tick(1.0)
-    cycle = runner.cycle
+    cycle = runner.cycles["SOLUSDT"]
     gateway.execute(cycle.entry_id, "1", "100")
     runner.tick(2.0)
     rogue = Order("manual-1", Purpose.ENTRY, Side.LONG, True, D("2"), price=D("100"), tif="GTC")
@@ -104,13 +104,13 @@ def test_enter_refused_when_symbol_not_flat(runner, gateway):
     gateway.execute("manual-2", "1", "100")
     cid = runner.store.enqueue("enter", {"side": "long", "qty": "1", "price": "100"})
     runner.tick(1.0)
-    assert runner.store.command_result(cid)[0] == "error" and runner.cycle is None
+    assert runner.store.command_result(cid)[0] == "error" and not runner.cycles
 
 
 def _entered(runner, gateway, qty="1"):
     runner.store.enqueue("enter", {"side": "long", "qty": qty, "price": "100"})
     runner.tick(1.0)
-    return runner.cycle
+    return runner.cycles["SOLUSDT"]
 
 
 def test_quiet_unhedged_tick_reads_only_the_book(runner, gateway):
@@ -185,9 +185,8 @@ def test_failed_call_mid_tick_still_saves_applied_fills(runner, gateway):
         raise UnknownResult("timeout")
 
     gateway.positions = positions_down
-    with pytest.raises(UnknownResult):
-        runner.tick(2.0)
-    assert runner.store.load_cycle().state is CycleState.SINGLE_POSITION
+    runner.tick(2.0)  # the failure is logged for this symbol; other symbols keep running
+    assert runner.store.load_cycles()["SOLUSDT"].state is CycleState.SINGLE_POSITION
 
 
 def test_source_watcher_sees_a_config_edit(tmp_path):
@@ -224,3 +223,55 @@ def test_runner_rests_adds_on_the_exchange_and_exits_on_fill(runner, gateway):
     exits = [o["order"] for o in gateway.orders.values() if o["order"].purpose is Purpose.ADD_EXIT]
     assert [(e.position_side, e.side, e.price) for e in exits] == [(Side.SHORT, "BUY", D("101.00"))]
     assert cycle.books[Side.SHORT].qty == D("1.1") and cycle.recovery is None
+
+
+def test_fills_streaming_into_a_working_entry_do_not_trigger_recovery(runner, gateway):
+    runner.store.enqueue("enter", {"side": "long", "qty": "10", "price": "100"})
+    runner.tick(1.0)
+    cycle = runner.cycles["SOLUSDT"]
+    real_positions = gateway.positions
+    for t in range(2, 6):  # every position read sees one more fill than the trades read before it
+        gateway.execute(cycle.entry_id, "1", "100")
+        gateway.positions = lambda symbol, _late=t: (gateway.execute(cycle.entry_id, "1", "100")
+                                                     if _late else None) or real_positions(symbol)
+        runner.tick(float(t))
+    gateway.positions = real_positions
+    assert cycle.recovery is None and cycle.state is CycleState.ENTRY_PARTIAL
+
+
+
+def test_cycles_on_two_symbols_run_side_by_side(runner, gateway):
+    runner.store.enqueue("enter", {"symbol": "AKEUSDT", "side": "long", "qty": "1", "price": "100"})
+    runner.store.enqueue("enter", {"symbol": "solusdt", "side": "short", "qty": "1", "price": "100"})
+    runner.tick(1.0)
+    ake, sol = runner.cycles["AKEUSDT"], runner.cycles["SOLUSDT"]
+    assert (ake.first_side, sol.first_side) == (Side.LONG, Side.SHORT) and ake.cfg.symbol == "AKEUSDT"
+    assert gateway.place_log == [("AKEUSDT", ake.entry_id), ("SOLUSDT", sol.entry_id)]
+    cid = runner.store.enqueue("close", {})
+    runner.tick(2.0)
+    assert runner.store.command_result(cid) == (
+        "error", "EngineError: several active cycles (AKEUSDT, SOLUSDT); pass --symbol")
+    runner.store.enqueue("close", {"symbol": "AKEUSDT"})
+    again = runner.store.enqueue("enter", {"symbol": "SOLUSDT", "side": "long", "qty": "1", "price": "100"})
+    runner.tick(3.0)
+    assert "AKEUSDT" not in runner.cycles  # closed before any fill
+    assert runner.store.command_result(again)[0] == "error" and runner.cycles["SOLUSDT"] is sol  # one per symbol
+
+
+def test_single_symbol_journal_is_migrated(tmp_path, cycle):
+    import json
+    import sqlite3
+    from stair.core.serde import to_plain
+    path = tmp_path / "old.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        "CREATE TABLE trades (trade_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, time_ms INTEGER NOT NULL,"
+        " raw TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0);")
+    db.execute("INSERT INTO kv VALUES('cycle', ?)", (json.dumps(to_plain(cycle)),))
+    db.execute("INSERT INTO trades VALUES(7, 1, 0, '{}', 1)")
+    db.commit()
+    db.close()
+    store = Store(path)
+    assert list(store.load_cycles()) == ["SOLUSDT"] and store.get("cycle") is None
+    assert store.last_trade_id("SOLUSDT") is None  # trades are read again and deduplicated by trade id

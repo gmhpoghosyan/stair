@@ -67,9 +67,7 @@ class DashboardData:
             if time.time() - self._exchange_at < self.ttl:
                 return self._exchange
             try:
-                view = {"enabled": True, "error": None, "at": time.time(),
-                        "positions": self.gateway.positions(None),
-                        "open_orders": [o.client_id for o in self.gateway.open_orders(self.symbol)]}
+                view = {"enabled": True, "error": None, "at": time.time(), "positions": self.gateway.positions(None)}
             except (ExchangeError, UnknownResult) as exc:
                 view = {**self._exchange, "enabled": True, "error": str(exc)}
             self._exchange, self._exchange_at = view, time.time()
@@ -78,13 +76,13 @@ class DashboardData:
     def snapshot(self) -> dict:
         store = Store(self.db_path)  # one connection per request; sqlite objects are per thread
         try:
-            cycle = store.load_cycle()
+            cycles = store.load_cycles()
             closed = [closed_view(ts, c) for ts, c in store.finished_cycles()]
             heartbeat = store.get("heartbeat")
         finally:
             store.close()
         net_total = sum((c["net"] for c in closed), Decimal(0))
-        return to_plain({"env": self.env, "symbol": self.symbol, "now": time.time(),
-                         "heartbeat": heartbeat, "exchange": self._exchange_view(),
-                         "cycle": cycle_view(cycle) if cycle else None,
+        return to_plain({"env": self.env, "now": time.time(), "heartbeat": heartbeat,
+                         "exchange": self._exchange_view(),
+                         "cycles": [cycle_view(c) for c in cycles.values()],
                          "closed": closed, "closed_net_total": net_total})

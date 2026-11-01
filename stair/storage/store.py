@@ -1,5 +1,6 @@
 """SQLite journal: cycle snapshots, an append-only event log, raw trades and the command queue.
-State lives on disk so a restart can reconcile instead of starting blind (section 10)."""
+State lives on disk so a restart can reconcile instead of starting blind (section 10).
+Each symbol has at most one active cycle, stored under kv key `cycle:<SYMBOL>`."""
 from __future__ import annotations
 
 import json
@@ -19,15 +20,16 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY, ts REAL NOT NULL, cycle_id TEXT, kind TEXT NOT NULL, payload TEXT);
 CREATE TABLE IF NOT EXISTS trades (
-    trade_id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, time_ms INTEGER NOT NULL,
-    raw TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0);
+    symbol TEXT NOT NULL, trade_id INTEGER NOT NULL, order_id INTEGER NOT NULL, time_ms INTEGER NOT NULL,
+    raw TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (symbol, trade_id));
 CREATE TABLE IF NOT EXISTS cycles (id TEXT PRIMARY KEY, finished_ts REAL NOT NULL, snapshot TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS commands (
     id INTEGER PRIMARY KEY, ts REAL NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending', result TEXT);
-CREATE INDEX IF NOT EXISTS trades_unprocessed ON trades(time_ms) WHERE processed=0;
+CREATE INDEX IF NOT EXISTS trades_unprocessed ON trades(symbol, time_ms) WHERE processed=0;
 CREATE INDEX IF NOT EXISTS commands_pending ON commands(id) WHERE status='pending';
 """
+_CYCLE = "cycle:"
 
 
 class Store:
@@ -36,7 +38,22 @@ class Store:
         self.path = path
         self._db = sqlite3.connect(path, isolation_level=None, timeout=10)
         self._db.execute("PRAGMA journal_mode=WAL")
+        self._migrate()
         self._db.executescript(_SCHEMA)
+
+    def _migrate(self) -> None:
+        """Journals from the single-symbol version: trades were keyed by trade id alone (ids are per
+        symbol on Binance) and the one active cycle sat under kv key 'cycle'. Dropped trades are read
+        again from the exchange; fills already applied are skipped by trade id (T10)."""
+        cols = [r[1] for r in self._db.execute("PRAGMA table_info(trades)")]
+        if cols and "symbol" not in cols:
+            self._db.execute("DROP TABLE trades")
+        if self._db.execute("SELECT 1 FROM sqlite_master WHERE name='kv'").fetchone():
+            row = self._db.execute("SELECT value FROM kv WHERE key='cycle'").fetchone()
+            if row:
+                symbol = json.loads(row[0])["rules"]["symbol"]
+                self._db.execute("INSERT OR REPLACE INTO kv(key, value) VALUES(?, ?)", (_CYCLE + symbol, row[0]))
+                self._db.execute("DELETE FROM kv WHERE key='cycle'")
 
     def close(self) -> None:
         self._db.close()
@@ -51,19 +68,20 @@ class Store:
         self._db.execute("INSERT INTO kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                          (key, json.dumps(to_plain(value))))
 
-    # cycle snapshot
+    # cycle snapshots
 
     def save_cycle(self, cycle: Cycle) -> None:
         if cycle.is_active:
-            self.set("cycle", cycle)
+            self.set(_CYCLE + cycle.symbol, cycle)
             return
         self._db.execute("INSERT OR REPLACE INTO cycles(id, finished_ts, snapshot) VALUES(?, ?, ?)",
                          (cycle.id, time.time(), json.dumps(to_plain(cycle))))
-        self._db.execute("DELETE FROM kv WHERE key='cycle'")
+        self._db.execute("DELETE FROM kv WHERE key=?", (_CYCLE + cycle.symbol,))
 
-    def load_cycle(self) -> Cycle | None:
-        data = self.get("cycle")
-        return from_plain(Cycle, data) if data else None
+    def load_cycles(self) -> dict[str, Cycle]:
+        """Active cycles by symbol."""
+        rows = self._db.execute("SELECT key, value FROM kv WHERE key LIKE ? ORDER BY key", (_CYCLE + "%",)).fetchall()
+        return {key[len(_CYCLE):]: from_plain(Cycle, json.loads(value)) for key, value in rows}
 
     def last_finished_cycle(self) -> Cycle | None:
         row = self._db.execute("SELECT snapshot FROM cycles ORDER BY finished_ts DESC LIMIT 1").fetchone()
@@ -87,23 +105,23 @@ class Store:
         return self._db.execute("SELECT ts, cycle_id, kind, payload FROM events ORDER BY id DESC LIMIT ?",
                                 (limit,)).fetchall()[::-1]
 
-    # trades (idempotent by trade id)
+    # trades (idempotent by symbol and trade id)
 
-    def add_trades(self, trades: list[Trade]) -> None:
-        self._db.executemany("INSERT OR IGNORE INTO trades(trade_id, order_id, time_ms, raw) VALUES(?, ?, ?, ?)",
-                             [(t.trade_id, t.order_id, t.time_ms, json.dumps(to_plain(t))) for t in trades])
+    def add_trades(self, symbol: str, trades: list[Trade]) -> None:
+        self._db.executemany(
+            "INSERT OR IGNORE INTO trades(symbol, trade_id, order_id, time_ms, raw) VALUES(?, ?, ?, ?, ?)",
+            [(symbol, t.trade_id, t.order_id, t.time_ms, json.dumps(to_plain(t))) for t in trades])
 
-    def unprocessed_trades(self, since_ms: int) -> list[Trade]:
-        rows = self._db.execute("SELECT raw FROM trades WHERE processed=0 AND time_ms>=? ORDER BY trade_id",
-                                (since_ms,)).fetchall()
+    def unprocessed_trades(self, symbol: str, since_ms: int) -> list[Trade]:
+        rows = self._db.execute("SELECT raw FROM trades WHERE symbol=? AND processed=0 AND time_ms>=? "
+                                "ORDER BY trade_id", (symbol, since_ms)).fetchall()
         return [from_plain(Trade, json.loads(r[0])) for r in rows]
 
-    def mark_processed(self, trade_id: int) -> None:
-        self._db.execute("UPDATE trades SET processed=1 WHERE trade_id=?", (trade_id,))
+    def mark_processed(self, symbol: str, trade_id: int) -> None:
+        self._db.execute("UPDATE trades SET processed=1 WHERE symbol=? AND trade_id=?", (symbol, trade_id))
 
-    def last_trade_id(self) -> int | None:
-        row = self._db.execute("SELECT MAX(trade_id) FROM trades").fetchone()
-        return row[0]
+    def last_trade_id(self, symbol: str) -> int | None:
+        return self._db.execute("SELECT MAX(trade_id) FROM trades WHERE symbol=?", (symbol,)).fetchone()[0]
 
     # command queue
 

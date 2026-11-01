@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import itertools
 from decimal import Decimal as D
 
@@ -47,6 +48,7 @@ class FakeGateway:
         self.ids = itertools.count(1000)
         self.trade_ids = itertools.count(1)
         self.place_calls: list[str] = []
+        self.place_log: list[tuple[str, str]] = []
         self.fail_next_place_unknown = False
         self.hedge = True
 
@@ -64,7 +66,7 @@ class FakeGateway:
 
     # gateway contract
     def server_time_ms(self): return 0
-    def market_rules(self, symbol): return rules()
+    def market_rules(self, symbol): return dataclasses.replace(rules(), symbol=symbol)
     def quote(self, symbol, *, last=True, mark=True): return self.book
     def hedge_mode(self): return self.hedge
     def set_hedge_mode(self, enabled): self.hedge = enabled
@@ -78,18 +80,21 @@ class FakeGateway:
     def positions(self, symbol):
         qty = {Side.LONG: D(0), Side.SHORT: D(0)}
         for cid, o in self.orders.items():
+            if o["symbol"] != symbol:
+                continue
             sign = 1 if o["order"].opening else -1
             qty[o["order"].position_side] += sign * o["executed"]
         return [PositionView(s, qty[s], D(0), D(0), 10, "cross", D(0)) for s in Side]
 
     def open_orders(self, symbol):
         return [self._report(c) for c, o in self.orders.items()
-                if o["status"] in (OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED)]
+                if o["symbol"] == symbol and o["status"] in (OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED)]
 
     def place(self, symbol, order):
         self.place_calls.append(order.client_id)
+        self.place_log.append((symbol, order.client_id))
         self.orders[order.client_id] = {"id": next(self.ids), "qty": order.qty, "executed": D(0),
-                                        "status": OrderStatus.NEW, "order": order}
+                                        "status": OrderStatus.NEW, "order": order, "symbol": symbol}
         if self.fail_next_place_unknown:
             self.fail_next_place_unknown = False
             raise UnknownResult("timeout")
@@ -108,7 +113,8 @@ class FakeGateway:
         return self._report(client_id)
 
     def trades(self, symbol, *, from_id=None, start_ms=None):
-        return [t for t in self.trade_log if from_id is None or t.trade_id >= from_id]
+        ids = {o["id"] for o in self.orders.values() if o["symbol"] == symbol}
+        return [t for t in self.trade_log if t.order_id in ids and (from_id is None or t.trade_id >= from_id)]
 
 
 @pytest.fixture

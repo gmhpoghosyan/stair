@@ -67,7 +67,6 @@ def supervise(argv: list[str], watched: list[Path]) -> int:
             return 130
         restart = True
         if code == RESTART_EXIT:
-            print("[reload] change detected, restarting", flush=True)
             continue
         if code == 0:
             return 0

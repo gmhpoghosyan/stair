@@ -17,7 +17,7 @@ def test_dashboard_reports_active_and_closed_cycles(tmp_path, cycle, gateway):
         fill(cycle, o.client_id, o.qty, "101", "0.01")
     store.save_cycle(cycle)  # finished -> archived
     data = DashboardData(tmp_path / "d.sqlite", "demo", "SOLUSDT", gateway).snapshot()
-    assert data["cycle"] is None and len(data["closed"]) == 1
+    assert data["cycles"] == [] and len(data["closed"]) == 1
     closed = data["closed"][0]
     # long 1 @ 100 -> 101 (+1), short 1 @ 100.5 -> 101 (-0.5), two close fees of 0.01
     assert D(closed["realized"]) == D("0.5") and D(closed["net"]) == D("0.48")
@@ -32,7 +32,7 @@ def test_dashboard_http_endpoints(tmp_path, gateway):
     try:
         assert b"Stair dashboard" in urllib.request.urlopen(base + "/").read()
         state = json.loads(urllib.request.urlopen(base + "/api/state").read())
-        assert state["cycle"] is None and state["env"] == "demo"
+        assert state["cycles"] == [] and state["env"] == "demo"
     finally:
         server.shutdown()
 
@@ -47,7 +47,7 @@ def test_dashboard_shows_adds_and_next_triggers(tmp_path, cycle, gateway):
     fill(cycle, short_add.client_id, "0.1", "101.51")
     store = Store(tmp_path / "a.sqlite")
     store.save_cycle(cycle)
-    view = DashboardData(tmp_path / "a.sqlite", "demo", "SOLUSDT", gateway).snapshot()["cycle"]
+    view = DashboardData(tmp_path / "a.sqlite", "demo", "SOLUSDT", gateway).snapshot()["cycles"][0]
     states = {a["side"]: (a["state"], a["exit_price"]) for a in view["adds"]}
     assert states == {"SHORT": ("open, exit working", "101.00"), "LONG": ("waiting at trigger", None)}
     cycle.on_quote(D("101.2"), D("101.21"), 11.0)  # HEDGED summary: SHORT busy, LONG waiting at its trigger

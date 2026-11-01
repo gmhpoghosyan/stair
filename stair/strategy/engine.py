@@ -89,6 +89,10 @@ class Cycle:
     # ---- derived values -------------------------------------------------
 
     @property
+    def symbol(self) -> str:
+        return self.rules.symbol
+
+    @property
     def display_state(self) -> CycleState:
         return CycleState.RECOVERY if self.recovery else self.state
 

@@ -28,7 +28,7 @@ app ──► execution ──► strategy ──► core
 | strategy | `stair/strategy` | `Cycle` state machine (section 8). Takes fills, statuses and quotes and returns order intents. Pure, so the backtest can drive it. |
 | exchange | `stair/exchange` | `ExchangeGateway` contract plus `BinanceFutures` (hedge mode, `positionSide`, no `reduceOnly`). |
 | storage | `stair/storage` | SQLite journal: cycle snapshots, event log, trades keyed by id, command queue. |
-| execution | `stair/execution` | `Runner` orchestrator, `OrderSync` (fills before statuses, idempotent), reconciliation, single-instance lock. |
+| execution | `stair/execution` | `Runner` orchestrator (one cycle per symbol, any number of symbols), `OrderSync` (fills before statuses, idempotent), reconciliation, single-instance lock. |
 | control | `stair/control` | Command submission API. The CLI uses it today; a local UI can reuse it (Q23). |
 | dashboard | `stair/dashboard` | Read-only local web view (journal + exchange read calls). |
 | app | `stair/app` | Settings (`config.toml` + `.env`) and the CLI. |
@@ -43,7 +43,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env        # fill in keys
 python -m stair check       # connectivity, hedge mode, fees, filters, balance
 python -m stair hedge-mode on   # account-wide; needs no open positions/orders (R01)
-python -m stair margin-type cross   # per symbol; needs no open position/orders on it (Q03)
+python -m stair margin-type cross --symbol SOLUSDT   # per symbol; needs no open position/orders on it (Q03)
 ```
 
 ## Running
@@ -57,13 +57,16 @@ python -m stair run
 Terminal 2 sends commands (they go through the journal's command queue):
 
 ```
-python -m stair enter long --qty 1 --price 95.30 [--post-only]   # first entry (R20: you spot the event)
-python -m stair status
+python -m stair enter long --symbol SOLUSDT --qty 1 --price 95.30 [--post-only]   # first entry (R20)
+python -m stair status [--symbol SOLUSDT]
 python -m stair log -n 50
-python -m stair resume                                           # re-send the hedge after an incomplete hedge paused the cycle
-python -m stair close                                            # full manual close (R14)
-python -m stair ack                                              # clear RECOVERY after fixing a mismatch
+python -m stair resume --symbol SOLUSDT   # re-send the hedge after an incomplete hedge paused the cycle
+python -m stair close --symbol SOLUSDT    # full manual close of that cycle (R14)
+python -m stair ack --symbol SOLUSDT      # clear RECOVERY after fixing a mismatch
 ```
+
+One bot runs any number of symbols, one cycle per symbol. `--symbol` defaults to `strategy.symbol` for `enter`; for
+`resume`, `close` and `ack` it can be left out while only one cycle is active.
 
 Dashboard (read-only, local only, opens the browser at http://127.0.0.1:8765):
 
@@ -77,6 +80,7 @@ chart. It also warns when the bot is stopped while a position is unhedged.
 
 `run` writes two log files to `data/`: `stair-<env>.log` (bot log) and `stair-<env>-journal.log` (every journal
 event: orders, cancels, fills, state changes, commands). `python -m stair log -n 50` reads the same journal.
+The terminal stays quiet: it is cleared on each start or reload and shows one status line.
 
 Edits apply on their own: `run` and `dashboard` restart when a file in `stair/`, `config.toml` or `.env` changes
 (the bot only between ticks), and an open dashboard tab reloads when the page changes. If a save has an error, the

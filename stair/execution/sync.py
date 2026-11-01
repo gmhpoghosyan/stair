@@ -93,24 +93,27 @@ class OrderSync:
         return int(cycle.created_at * 1000) - 60_000
 
     def _fetch_trades(self, cycle: Cycle) -> None:
-        last = self.store.last_trade_id()
+        last = self.store.last_trade_id(self.symbol)
         if last is None:
             fresh = self.gateway.trades(self.symbol, start_ms=self._since_ms(cycle))
         else:
             fresh = self.gateway.trades(self.symbol, from_id=last + 1)
-        self.store.add_trades(fresh)
+        self.store.add_trades(self.symbol, fresh)
 
     def _apply_trades(self, cycle: Cycle) -> list[Intent]:
         by_exchange_id = {o.exchange_id: o for o in cycle.orders.values() if o.exchange_id}
         intents: list[Intent] = []
-        for trade in self.store.unprocessed_trades(self._since_ms(cycle)):
+        for trade in self.store.unprocessed_trades(self.symbol, self._since_ms(cycle)):
             order = by_exchange_id.get(trade.order_id)
             if order is None:
                 continue  # unknown or foreign order; reconciliation flags any position effect
+            if trade.trade_id in order.trade_ids:
+                self.store.mark_processed(self.symbol, trade.trade_id)  # read again, already applied (T10)
+                continue
             fee = self.gateway.to_usdt(trade.commission, trade.commission_asset)
             fill = Fill(trade.trade_id, order.client_id, trade.qty, trade.price, fee)
             intents += cycle.on_fill(fill)
-            self.store.mark_processed(trade.trade_id)
+            self.store.mark_processed(self.symbol, trade.trade_id)
             self.store.log("fill", fill, cycle.id)
             log.info("fill %s %s %s @ %s fee %s", order.client_id, order.side, trade.qty, trade.price, fee)
         return intents

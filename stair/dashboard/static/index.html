@@ -181,32 +181,36 @@ function renderHeader(d) {
     : ex.error ? badge("critical", "Exchange unreachable") : badge("good", "Exchange connected");
 }
 
-function exchangeSides(d) {
+function exchangeSides(d, symbol) {
   const out = { LONG: 0, SHORT: 0 };
-  for (const p of (d.exchange.positions || [])) if (p.symbol === d.symbol) out[p.side] += Number(p.qty);
+  for (const p of (d.exchange.positions || [])) if (p.symbol === symbol) out[p.side] += Number(p.qty);
   return out;
 }
 
 function renderBanners(d) {
   const msgs = [];
   if (d.exchange.error) msgs.push(`Exchange data may be stale: ${d.exchange.error}`);
-  const c = d.cycle;
-  if (c && c.recovery) msgs.push(`Recovery: ${c.recovery}. Fix it, then run <span class="mono">python -m stair ack</span>.`);
-  if (c && ["SINGLE_POSITION", "ENTRY_PARTIAL", "HEDGE_PENDING"].includes(c.state) && !(d.heartbeat && d.now - d.heartbeat < 10))
-    msgs.push("The cycle has unhedged exposure and the bot is not running. Hedge triggers only work while <span class=\"mono\">python -m stair run</span> is active.");
+  const running = d.heartbeat && d.now - d.heartbeat < 10;
+  for (const c of d.cycles) {
+    if (c.recovery) msgs.push(`${esc(c.symbol)} recovery: ${esc(c.recovery)}. Fix it, then run `
+      + `<span class="mono">python -m stair ack --symbol ${esc(c.symbol)}</span>.`);
+    if (["SINGLE_POSITION", "ENTRY_PARTIAL", "HEDGE_PENDING"].includes(c.state) && !running)
+      msgs.push(`${esc(c.symbol)} has unhedged exposure and the bot is not running. Hedge triggers only work while `
+        + `<span class="mono">python -m stair run</span> is active.`);
+  }
   document.getElementById("banners").innerHTML = msgs.map(m =>
     `<div class="banner">${badge("critical", "Attention")} &nbsp;${m}</div>`).join("");
 }
 
 function renderTiles(d) {
-  const c = d.cycle;
-  const st = c ? (STATES[c.state] || ["neutral", "○", c.state]) : ["neutral", "○", "No active cycle"];
+  const cs = d.cycles;
   const openUpnl = (d.exchange.positions || []).reduce((s, p) => s + Number(p.unrealized), 0);
+  const unhedged = cs.filter(c => c.state !== "HEDGED").length;
+  const totals = cs.map(c => num(c.total)).filter(v => v !== null);
   const tiles = [
-    ["Cycle state", badge(st[0], st[2], st[1]), c ? `cycle ${esc(c.cycle)} · ${esc(c.first_side || "")} first` : "start with enter"],
+    ["Active cycles", String(cs.length), cs.length ? `${cs.length - unhedged} hedged · ${unhedged} other` : "start with enter"],
     ["Open positions", String((d.exchange.positions || []).length), d.exchange.positions ? `unrealized ${signed(openUpnl, 2)} USDT` : "exchange view off"],
-    ["Delta (long − short)", c ? fmt(c.delta) : "–", "coins of directional exposure"],
-    ["Active cycle P&L", c ? signed(c.total, 2) : "–", "USDT, incl. unrealized, after fees"],
+    ["Active cycles P&L", totals.length ? signed(totals.reduce((a, b) => a + b, 0), 2) : "–", "USDT, incl. unrealized, after fees"],
     ["Closed cycles net", signed(d.closed_net_total, 2), `${d.closed.length} cycle${d.closed.length === 1 ? "" : "s"} · USDT`],
   ];
   document.getElementById("tiles").innerHTML = tiles.map(([l, v, s]) =>
@@ -229,9 +233,8 @@ const POSITION_COLS = [
 
 // One row per symbol: the LONG and SHORT legs of a hedge share a line.
 function positionGroups(d) {
-  const c = d.cycle;
-  const bySymbol = new Map();
-  if (c) bySymbol.set(c.symbol, []);  // the bot's symbol first, even before it has an exchange position
+  const cycles = new Map(d.cycles.map(c => [c.symbol, c]));
+  const bySymbol = new Map([...cycles.keys()].map(s => [s, []]));  // bot symbols first, even before a fill
   for (const p of (d.exchange.positions || [])) {
     if (!bySymbol.has(p.symbol)) bySymbol.set(p.symbol, []);
     bySymbol.get(p.symbol).push(p);
@@ -241,7 +244,8 @@ function positionGroups(d) {
     g.delta = Number(g.LONG?.qty || 0) - Number(g.SHORT?.qty || 0);
     g.unrealized = legs.reduce((sum, p) => sum + Number(p.unrealized), 0);
     g.liq = [...new Set(legs.map(p => Number(p.liquidation_price)).filter(Boolean))];
-    if (c && c.symbol === symbol) {
+    const c = g.cycle = cycles.get(symbol);
+    if (c) {
       const st = STATES[c.state] || ["neutral", "○", c.state];
       g.state = badge(st[0], st[2], st[1]);
     } else {
@@ -264,18 +268,17 @@ document.getElementById("positions").addEventListener("toggle", ev => {
 
 function renderPositions(d) {
   const el = document.getElementById("positions");
-  const c = d.cycle;
   const groups = positionGroups(d);
   if (!groups.length) {
     el.innerHTML = `<div class="empty">${d.exchange.enabled ? "No open positions on the account. Start a cycle with "
-      + '<span class="mono">python -m stair enter long --qty 1 --price &lt;price&gt;</span>.' : "Exchange view is off (--no-exchange)."}</div>`;
+      + '<span class="mono">python -m stair enter long --symbol &lt;SYMBOL&gt; --qty 1 --price &lt;price&gt;</span>.' : "Exchange view is off (--no-exchange)."}</div>`;
     return;
   }
   const labels = POSITION_COLS.map(col => `<span class="${col.num ? "num" : ""}">${esc(col.label)}</span>`).join("");
   el.innerHTML = `<div class="pos-row pos-labels" aria-hidden="true"><span></span>${labels}</div>` + groups.map(g => {
     const cells = POSITION_COLS.map(col =>
       `<span class="${col.num ? "num" : ""}" data-label="${esc(col.label)}">${col.html(g)}</span>`).join("");
-    const panel = c && c.symbol === g.symbol ? cycleDetails(d)
+    const panel = g.cycle ? cycleDetails(d, g.cycle)
       : `<div class="empty">No bot cycle on ${esc(g.symbol)}: this position was opened outside the bot.</div>`;
     return `<details class="pos" data-key="${esc(g.symbol)}"${openPositions.has(g.symbol) ? " open" : ""}>
       <summary class="pos-row"><span class="chev" aria-hidden="true">›</span>${cells}</summary>
@@ -283,11 +286,10 @@ function renderPositions(d) {
   }).join("");
 }
 
-// The active cycle: facts, both books against the exchange, and working orders.
-function cycleDetails(d) {
-  const c = d.cycle;
+// One active cycle: facts, both books against the exchange, adds and working orders.
+function cycleDetails(d, c) {
   const st = STATES[c.state] || ["neutral", "○", c.state];
-  const ex = exchangeSides(d);
+  const ex = exchangeSides(d, c.symbol);
   const th = c.thresholds;
   const facts = [
     ["State", badge(st[0], st[2], st[1])], ["Started", time(c.created_at)],

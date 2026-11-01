@@ -8,7 +8,7 @@ spec owner replaces it locally.
 |---|---|---|
 | Q03 | USDT-M perpetual only. Margin type is not changed; `check` and `status` show it. | `exchange/binance.py` |
 | Q04 | Q0 is entered in coins. Capital limits are not enforced yet. | `enter --qty` |
-| Q05 | One symbol (`strategy.symbol`), one active cycle. `enter` is refused while one is active or the symbol has foreign positions/orders. | `Runner._enter` |
+| Q05 | Any number of symbols, one active cycle per symbol (`enter --symbol`; `strategy.symbol` is the default). `enter` is refused while that symbol has an active cycle or foreign positions/orders. Leverage is set per symbol on first use. | `Runner._enter` |
 | Q06 | The event is a manual CLI command. | `enter` |
 | Q07 | Plain limit entry. If the price crosses the book, the command warns that it fills as taker. No breakout trigger. | `Runner._enter` |
 | Q09 | Positive hedge: GTC limit at the fee-adjusted threshold. Negative hedge: MARKET (`negative_hedge_order`). A rejection with zero fill re-arms the thresholds, up to `hedge_max_attempts`. After that, or after a partial fill followed by a cancel, the cycle goes to PAUSED and `resume` re-sends the remainder. | `Cycle._place_hedge`, `_hedge_progress` |
