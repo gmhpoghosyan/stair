@@ -31,6 +31,8 @@ spec owner replaces it locally.
 |---|---|---|
 | When | Only while HEDGED, after either hedge branch. Not while PAUSED, CLOSING or in RECOVERY. | `Cycle.on_quote` |
 | Trigger | 1% (`add_trigger_pct`) beyond the leg's entry price as the exchange shows it, without fees. Rounded to the tick away from the market. | `Cycle.add_trigger` |
+| Negative spread | While the short average is below the long average (no fees, legs as they are now, checked on every tick), the reference swaps: SHORT add 1% above the long entry, LONG add 1% below the short entry. Once the spread is zero or positive the own-leg rule is back. | `Cycle.spread_negative`, `Cycle.add_trigger` |
+| Re-pricing | An unfilled resting add whose trigger no longer matches (the other leg moved, or the spread changed sign) is cancelled and re-placed at the new trigger. A partly filled add is left as it is. | `_manage_adds` |
 | Size | `add_fraction` (0.1) × Q0, rounded down to the lot step. Below exchange minimums the add is skipped, and `enter` warns about it. | `Cycle.add_qty` |
 | Orders | A GTC limit at the trigger rests on the exchange, so it fills while the bot is offline. If the price is already past the trigger, it fills at once as taker. After it fills, the exit rests as a GTC limit. | `_place_add`, `_place_add_exit` |
 | Exit | The price at which the add nets 0.5% (`add_exit_pct`) of its entry notional after its actual entry fee and a maker exit fee. Rounded so the net is at least the target. | `Cycle.add_exit` |

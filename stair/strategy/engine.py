@@ -139,13 +139,21 @@ class Cycle:
         raw = pricing.negative_hedge_price(self.first_side, self.e0, self.cfg.adverse_move)
         return pricing.round_to(raw, self.rules.tick_size, up=self.first_side is Side.SHORT)
 
+    def spread_negative(self) -> bool:
+        """Short average below long average (no fees), from the legs as they are now."""
+        long, short = self.books[Side.LONG], self.books[Side.SHORT]
+        return bool(long.qty and short.qty) and short.avg < long.avg
+
     def add_trigger(self, side: Side) -> Decimal | None:
-        """add_trigger_pct beyond the leg's entry price as the exchange shows it (no fees). Rounded away
-        from the market, so the move is at least the full percentage."""
+        """add_trigger_pct beyond the leg's entry price as the exchange shows it (no fees). While the spread
+        is negative each leg measures from the other leg's price instead (SHORT add 1% above the long, LONG
+        add 1% below the short), pushing the averages apart until the spread is positive again.
+        Rounded away from the market, so the move is at least the full percentage."""
         book = self.books[side]
         if not book.qty:
             return None
-        raw = pricing.add_trigger_price(side, book.avg, self.cfg.add_trigger_pct)
+        ref = self.books[side.opposite] if self.spread_negative() else book
+        raw = pricing.add_trigger_price(side, ref.avg, self.cfg.add_trigger_pct)
         return pricing.round_to(raw, self.rules.tick_size, up=side is Side.SHORT)
 
     def add_qty(self, price: Decimal) -> Decimal | None:
@@ -384,6 +392,10 @@ class Cycle:
             if not entry.is_terminal:
                 if entry.filled and self._exit_reached(add):
                     out += self._cancel(entry)  # partly filled and already back at its exit: take what filled
+                elif not entry.filled and add.trigger != self.add_trigger(side):
+                    # The other leg's price or the spread sign changed: re-placed at the new trigger.
+                    add.note = "moved to a new trigger"
+                    out += self._cancel(entry)
             elif add.exit_id is None and self._ready(f"exit:{add.id}"):
                 out.append(self._place_add_exit(add))
         return out
@@ -421,7 +433,7 @@ class Cycle:
                 return []
             if order.filled == 0:
                 add.closed = True
-                add.note = f"entry {order.status.value} {order.reason or ''}".strip()
+                add.note = add.note or f"entry {order.status.value} {order.reason or ''}".strip()
                 if order.status is OrderStatus.REJECTED:
                     self._cooldown(f"add:{add.side.value}")
                 return []

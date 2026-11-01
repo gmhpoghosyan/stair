@@ -185,6 +185,47 @@ def test_close_cancels_resting_adds_and_flattens_including_an_open_add(cycle):
     assert {o.position_side: o.qty for o in closes} == {Side.LONG: D("1"), Side.SHORT: D("1.1")}
 
 
+def negative_hedged(cycle, short_fill):
+    entry = places(cycle.enter(Side.LONG, D("1"), D("100"), post_only=False))[0]
+    fill(cycle, entry.client_id, "1", "100")
+    hedge = places(cycle.on_quote(D("99.6"), D("99.61"), 1.0))[0]  # negative branch
+    fill(cycle, hedge.client_id, "1", short_fill)
+    assert cycle.state is CycleState.HEDGED and cycle.spread_negative()
+
+
+def test_negative_spread_adds_measure_from_the_other_leg(cycle):
+    # Long 1 @ 100, short 1 @ 99.6: SHORT add 1% above the LONG leg, LONG add 1% below the SHORT leg.
+    negative_hedged(cycle, "99.6")
+    resting = {o.position_side: o for o in places(cycle.on_quote(D("99.6"), D("99.61"), 10.0))}
+    assert resting[Side.SHORT].price == D("101.00") and resting[Side.LONG].price == D("98.60")  # 98.604 down
+    exit_order = places(fill(cycle, resting[Side.SHORT].client_id, "0.1", "101"))[0]
+    fill(cycle, exit_order.client_id, "0.1", exit_order.price)
+    assert cycle.books[Side.SHORT].avg.quantize(D("0.0001")) == D("99.7273") and cycle.spread_negative()
+    # The short leg moved, so the resting LONG add moves with it: 99.7273 x 0.99 = 98.73.
+    out = cycle.on_quote(D("99.6"), D("99.61"), 11.0)
+    assert cancels(out) == [resting[Side.LONG].client_id]
+    assert [(o.position_side, o.price) for o in places(out)] == [(Side.SHORT, D("101.00"))]  # long avg unchanged
+    cycle.on_status(resting[Side.LONG].client_id, OrderStatus.CANCELED)
+    nxt = places(cycle.on_quote(D("99.6"), D("99.61"), 12.0))
+    assert [(o.position_side, o.price) for o in nxt] == [(Side.LONG, D("98.73"))]
+
+
+def test_positive_rules_return_once_the_spread_turns_positive(cycle):
+    negative_hedged(cycle, "99.95")
+    resting = {o.position_side: o for o in places(cycle.on_quote(D("99.9"), D("99.91"), 10.0))}
+    assert resting[Side.SHORT].price == D("101.00") and resting[Side.LONG].price == D("98.95")
+    exit_order = places(fill(cycle, resting[Side.SHORT].client_id, "0.1", "101"))[0]
+    fill(cycle, exit_order.client_id, "0.1", exit_order.price)
+    assert not cycle.spread_negative()  # short avg 110.05 / 1.1 = 100.0455 > 100
+    out = cycle.on_quote(D("99.9"), D("99.91"), 11.0)
+    assert cancels(out) == [resting[Side.LONG].client_id]
+    assert [(o.position_side, o.price) for o in places(out)] == [(Side.SHORT, D("101.05"))]  # 100.0455 x 1.01
+    cycle.on_status(resting[Side.LONG].client_id, OrderStatus.CANCELED)
+    nxt = places(cycle.on_quote(D("99.9"), D("99.91"), 12.0))
+    assert [(o.position_side, o.price) for o in nxt] == [(Side.LONG, D("99.00"))]  # own leg again: 100 x 0.99
+    assert next(a for a in cycle.adds if a.entry_id == resting[Side.LONG].client_id).note == "moved to a new trigger"
+
+
 def test_no_adds_below_exchange_minimums(cycle):
     hedged(cycle, q0="0.05")  # add of 0.005 rounds to 0 at step 0.01
     assert places(cycle.on_quote(D("100.4"), D("100.41"), 10.0)) == []

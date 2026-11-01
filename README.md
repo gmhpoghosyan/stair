@@ -11,6 +11,11 @@ own fees. The leg's entry price keeps the add in its average, so the next trigge
 short 100.5 → SHORT add at 101.505, closed near 100.997; the short entry becomes 100.591, so the next add is at
 101.597.
 
+While the spread is negative (short entry below long entry), each leg measures from the other leg instead: the SHORT
+leg adds 1% above the long entry and the LONG leg adds 1% below the short entry. The adds push the averages apart
+until the spread is positive, then the rules above apply again. Example: long 100, short 99.6 → SHORT add at 101.00,
+LONG add at 98.60.
+
 Status: **demo stage** (R15). Live trading is locked behind an explicit switch.
 
 ## Components
